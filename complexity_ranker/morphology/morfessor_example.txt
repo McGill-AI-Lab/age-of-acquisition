@@ -1,0 +1,8 @@
+to generate a .bin file for a morfessor model from a text:
+
+step 1 (Python):
+    words = Preprocess.preprocess_text(text)
+    Preprocess._prepare_text_file(words, 'corpus')
+
+step 2 (CLI):
+    morfessor-train -s model.bin corpus.txt

@@ -1,5 +1,5 @@
+from complexity_ranker.phonology.phonological_complexity import PhonologicalComplexity
 from complexity_ranker.utils import Preprocess
-from complexity_ranker.phonology import PhonologicalComplexity
 
 # Example of a simple sentence
 sentence_1 = "This banana is very delicious!"

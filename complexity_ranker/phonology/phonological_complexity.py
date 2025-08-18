@@ -1,21 +1,22 @@
 import pronouncing
+
 from complexity_ranker.phonology.phonological_stats import PhonoStats
 
 
 class PhonologicalComplexity:
     @classmethod
-    def is_vowel(cls, phoneme: str) -> bool:
+    def _is_vowel(cls, phoneme: str) -> bool:
         """Check if a phoneme is a vowel (ARPAbet vowels all end with a digit indicating stress)."""
         return phoneme[-1].isdigit()
     
     @classmethod
-    def consonant_clusters(cls, phonemes: list[str]) -> list[int]:
+    def _consonant_clusters(cls, phonemes: list[str]) -> list[int]:
         """Find consonant clusters in a phoneme list."""
         clusters = []
         current_length = 0
     
         for p in phonemes:
-            if cls.is_vowel(p):
+            if cls._is_vowel(p):
                 if current_length > 0:
                     clusters.append(current_length)
                     current_length = 0
@@ -53,7 +54,7 @@ class PhonologicalComplexity:
     
             stats.known_word_count += 1
     
-            clusters = cls.consonant_clusters(phonemes)
+            clusters = cls._consonant_clusters(phonemes)
             stats.single_consonant += clusters.count(1)
             stats.clusters_size_2 += clusters.count(2)
             stats.clusters_size_3 += clusters.count(3)

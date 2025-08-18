@@ -1,0 +1,6 @@
+class MorphoWeights:
+    TTR = 1.0
+    HAPAX = 0.8
+    MEAN_MORPHEMES = 1.2
+    PERCENT_COMPLEX = 1.0
+    AVG_INFLECTIONAL_VARIANTS = 1.0
