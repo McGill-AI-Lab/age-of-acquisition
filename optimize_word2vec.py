@@ -169,7 +169,7 @@ if __name__ == '__main__':
     for param, value in best_params.items():
         print(f"- {param}: {value}")
 
-    # 5. Visualize the Results
+    # 5. Visualize the Results of BO
     print("\nPlotting convergence...")
     plot_convergence(result)
 
@@ -187,4 +187,5 @@ if __name__ == '__main__':
 
     print("Plotting objective function (may be slow)...")
     _ = plot_objective(result, n_points=10)
+
     plt.show()
