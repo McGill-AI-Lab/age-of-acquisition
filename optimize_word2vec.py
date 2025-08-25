@@ -262,7 +262,7 @@ if __name__ == '__main__':
         print("This is NOT a robust evaluation method. For real use cases, use a proper evaluation set.\n")
 
     # 3. Run Bayesian Optimization
-    n_calls = 5  # Number of times to call the objective function.
+    n_calls = 5  # Number of times to call the objective function. 5 is the minimum number of calls.
 
     print(f"Starting Bayesian Optimization for {n_calls} iterations...")
 
@@ -314,3 +314,4 @@ if __name__ == '__main__':
     print("Plotting objective function (may be slow)...")
     _ = plot_objective(result, n_points=10)
     plt.show()
+
