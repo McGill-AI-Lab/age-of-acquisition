@@ -77,7 +77,7 @@ search_space = [
     Categorical([0, 1], name='sg'),  # 0 for CBOW, 1 for Skip-Gram.
     Real(1e-5, 1e-3, "log-uniform", name='sample'),  # Downsampling of high-frequency words.
     Integer(5, 20, name='negative'),  # Number of "noise words" for negative sampling.
-    Integer(5, 15, name='epochs')  # Number of iterations over the corpus.
+    Integer(5, 10, name='epochs')  # Number of iterations over the corpus.
 ]
 
 def evaluate_bats_accuracy(model: Word2Vec, bats_dir: str, max_pairs_per_category: int = 50, comparisons_per_category: int = 100) -> float:
@@ -143,14 +143,14 @@ def evaluate_bats_accuracy(model: Word2Vec, bats_dir: str, max_pairs_per_categor
 
 class SimilarityCallback(CallbackAny2Vec):
     """
-    Callback to record the cosine similarity of a word pair at the end of each epoch.
+    Callback to record the cosine similarity of one or more word pairs at the end of each epoch.
     This is the most efficient way to track metrics during training, as it avoids
     a Python-based epoch loop and ensures correct learning rate annealing.
     """
-    def __init__(self, word1, word2):
-        self.word1 = word1
-        self.word2 = word2
-        self.similarities = []
+    def __init__(self, pairs_to_track: list[tuple[str, str]]):
+        self.pairs_to_track = pairs_to_track
+        # Initialize a dict to hold similarity lists for each pair
+        self.similarities = {pair: [] for pair in self.pairs_to_track}
         self._epoch = 0
 
     def on_epoch_end(self, model):
@@ -158,12 +158,13 @@ class SimilarityCallback(CallbackAny2Vec):
         Method called by gensim at the end of each training epoch.
         """
         self._epoch += 1
-        try:
-            sim = model.wv.similarity(self.word1, self.word2)
-            self.similarities.append(sim)
-        except KeyError:
-            # One or both words might not be in the vocabulary, especially with a high min_count
-            self.similarities.append(None)
+        for w1, w2 in self.pairs_to_track:
+            try:
+                sim = model.wv.similarity(w1, w2)
+                self.similarities[(w1, w2)].append(sim)
+            except KeyError:
+                # One or both words might not be in the vocabulary
+                self.similarities[(w1, w2)].append(None)
 
 
 def create_objective_function(training_corpus, eval_filepath, search_space_dims, epoch_similarity_history, eval_method='analogy'):
@@ -181,15 +182,22 @@ def create_objective_function(training_corpus, eval_filepath, search_space_dims,
         }
         print(f"\nTesting parameters: {params}")
 
-        # Get word pair for tracking similarity over epochs
-        pair_env = os.getenv('COSINE_PAIR', 'king,queen')
-        try:
-            w1, w2 = [w.strip() for w in pair_env.split(',')]
-        except Exception:
-            w1, w2 = 'king', 'queen'
+        # Define the word pairs to track during training
+        pairs_to_track = []
+        if eval_method == 'cosine':
+            # For 'cosine' eval, we specifically track two pairs for plotting and optimize on the first.
+            pairs_to_track = [('dog', 'wolf'), ('dog', 'table')]
+        else:
+            # For other eval methods, we still track a default/user-defined pair for insight.
+            pair_env = os.getenv('COSINE_PAIR', 'dog,table')
+            try:
+                w1, w2 = [w.strip() for w in pair_env.split(',')]
+                pairs_to_track.append((w1, w2))
+            except Exception:
+                pairs_to_track.append(('dog', 'table'))
 
         # Instantiate the callback to record similarity at each epoch
-        similarity_callback = SimilarityCallback(w1, w2)
+        similarity_callback = SimilarityCallback(pairs_to_track)
 
         # Train the model once. The callback will collect the similarity history.
         # This is more efficient and correctly handles learning rate annealing over epochs.
@@ -214,15 +222,17 @@ def create_objective_function(training_corpus, eval_filepath, search_space_dims,
 
         score = 1.0  # Default to a bad score
         if eval_method == 'cosine':
-            # For 'cosine' method, the score is the negative average similarity
-            valid_similarities = [s for s in similarities_this_run if s is not None]
+            # For 'cosine' method, the score is the negative average similarity of the primary pair.
+            primary_pair = pairs_to_track[0]  # This will be ('dog', 'wolf')
+            similarities_for_score = similarities_this_run.get(primary_pair, [])
+            valid_similarities = [s for s in similarities_for_score if s is not None]
             if valid_similarities:
                 avg_sim = sum(valid_similarities) / len(valid_similarities)
                 score = -avg_sim
-                print(f"Cosine similarity across epochs for ({w1}, {w2}): avg={avg_sim:.4f} -> Score: {score:.4f}")
+                print(f"Cosine similarity for scoring ({primary_pair[0]}, {primary_pair[1]}): avg={avg_sim:.4f} -> Score: {score:.4f}")
             else:
                 score = 1.0
-                print(f"Cosine similarity across epochs for ({w1}, {w2}): no valid measurements -> Score: {score:.4f}")
+                print(f"Cosine similarity for scoring ({primary_pair[0]}, {primary_pair[1]}): no valid measurements -> Score: {score:.4f}")
 
         elif eval_filepath:
             # For other methods, evaluate the fully trained model
@@ -251,9 +261,9 @@ def create_objective_function(training_corpus, eval_filepath, search_space_dims,
         else:
             # Fallback if evaluation file is not available
             try:
-                similarity = model.wv.similarity('king', 'queen')
+                similarity = model.wv.similarity('dog', 'table')
                 score = -similarity
-                print(f"Fallback similarity ('king', 'queen'): {similarity:.4f} -> Score: {score:.4f}")
+                print(f"Fallback similarity ('dog', 'table'): {similarity:.4f} -> Score: {score:.4f}")
             except KeyError:
                 score = 1.0
 
@@ -285,7 +295,7 @@ if __name__ == '__main__':
 
     if EVALUATION_METHOD in ('analogy', 'simlex', 'bats') and not eval_filepath:
         print("\nWARNING: Could not load the requested evaluation dataset.")
-        print("The optimization will proceed using a simple similarity score ('king' vs 'queen').")
+        print("The optimization will proceed using a simple similarity score ('dog' vs 'table').")
         print("This is NOT a robust evaluation method. For real use cases, use a proper evaluation set.\n")
 
     # 3. Run Bayesian Optimization
@@ -339,36 +349,46 @@ if __name__ == '__main__':
     # Plot cosine similarity over epochs for the best model found during optimization
     print("\nPlotting cosine similarity over epochs for the best model...")
 
-    # Get word pair from environment variable, e.g., COSINE_PAIR="king,queen"
-    pair_env = os.getenv('COSINE_PAIR', 'king,queen')
-    try:
-        w1, w2 = [w.strip() for w in pair_env.split(',')]
-    except Exception:
-        w1, w2 = 'king', 'queen'
-
     # Retrieve the similarity history for the best parameter set
     best_params_key = tuple(sorted(best_params.items()))
     best_history = epoch_similarity_history.get(best_params_key)
 
     if best_history:
-        # Filter out None values for plotting if any occurred (e.g., word not in vocab in early epochs)
-        epochs_with_data = [i + 1 for i, sim in enumerate(best_history) if sim is not None]
-        similarities_with_data = [sim for sim in best_history if sim is not None]
+        plt.figure(figsize=(10, 6))
 
-        if epochs_with_data:
-            plt.figure(figsize=(10, 6))
-            plt.plot(epochs_with_data, similarities_with_data, marker='o', linestyle='-')
-            plt.title(f"Cosine Similarity of ('{w1}', '{w2}') Across Epochs (Best Model)")
+        # Define colors for specific pairs if they exist
+        color_map = {
+            ('dog', 'wolf'): 'blue',
+            ('dog', 'table'): 'red'
+        }
+
+        has_plotted = False
+        # The history is a dictionary of {pair: [similarities]}
+        for pair, history_for_pair in best_history.items():
+            epochs_with_data = [i + 1 for i, sim in enumerate(history_for_pair) if sim is not None]
+            similarities_with_data = [sim for sim in history_for_pair if sim is not None]
+
+            if epochs_with_data:
+                # Use predefined color if available, otherwise let matplotlib decide
+                color = color_map.get(pair)
+                label = f"('{pair[0]}', '{pair[1]}')"
+                plt.plot(epochs_with_data, similarities_with_data, marker='o', linestyle='-', label=label, color=color)
+                has_plotted = True
+
+        if has_plotted:
+            plt.title("Cosine Similarity Across Epochs (Best Model)")
             plt.xlabel("Epoch")
             plt.ylabel("Cosine Similarity")
             plt.grid(True)
+            plt.legend()
+
             # Use the number of epochs from the best parameters for x-ticks
             num_epochs = best_params['epochs']
             if num_epochs > 0:
                 plt.xticks(range(1, num_epochs + 1))
             plt.show()
         else:
-            print(f"Could not plot similarity for ('{w1}', '{w2}') as no valid measurements were recorded for the best run.")
+            print("Could not plot similarity as no valid measurements were recorded for the best run.")
     else:
         print("Could not find similarity history for the best parameter set.")
 
