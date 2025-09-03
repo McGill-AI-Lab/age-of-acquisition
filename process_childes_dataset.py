@@ -6,23 +6,33 @@ import re
 
 def save_dataset_to_txt(dataset, output_file):
     """
-    Save the CHILDES dataset to a text file.
+    Save the CHILDES dataset to a text file, filtering out speaker tags and
+    annotations, and condensing the result into a single paragraph.
     
     Args:
         dataset: Hugging Face dataset object
         output_file (str): Path to the output text file
     """
+    all_utterances = []
+    # Iterate through each split in the dataset (train, validation, test)
+    for split in dataset:
+        # Get all examples in the current split
+        for example in dataset[split]:
+            # Get the utterance line, preferring 'utterance' over 'text'
+            line = example.get('utterance') or example.get('text')
+            if line:
+                # 1. Remove speaker tag (e.g., *MOT:, *FAT:) using regex
+                cleaned_line = re.sub(r'^\*[A-Z]{3}:\s*', '', line)
+                # 2. Remove content in square brackets (e.g., [+ I], [= crying])
+                cleaned_line = re.sub(r'\[.*?\]', '', cleaned_line)
+                # 3. Strip leading/trailing whitespace and add if not empty
+                cleaned_line = cleaned_line.strip()
+                if cleaned_line:
+                    all_utterances.append(cleaned_line)
+    # Join all cleaned utterances into a single paragraph separated by spaces
+    condensed_paragraph = ' '.join(all_utterances)
     with open(output_file, 'w', encoding='utf-8') as f:
-        # Iterate through each split in the dataset (train, validation, test)
-        for split in dataset:
-            # Get all examples in the current split
-            for example in dataset[split]:
-                # Write each utterance to the file
-                if 'utterance' in example:
-                    f.write(example['utterance'] + '\n')
-                # Some datasets might use 'text' instead of 'utterance'
-                elif 'text' in example:
-                    f.write(example['text'] + '\n')
+        f.write(condensed_paragraph)
 
 def main():
     # Set up argument parser
