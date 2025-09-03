@@ -3,6 +3,7 @@ Download dataset from https://osf.io/7pqyg
 Add concreteness.participant.rda to concreteness_curriculum/data/
 
 This file loads the data into a pandas DataFrame and then downloads the data into parquet shards for easy testing & access
+Data is outputted into data/parquet/
 """
 import pyreadr # pip install pyreadr
 import pandas as pd
