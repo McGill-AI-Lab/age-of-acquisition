@@ -1,16 +1,18 @@
 """
 This file creates a dataframe that scores the words based on concreteness values.
+Stores this dataframe as a parquet into data/outputs/word_concreteness_mean.parquet
 This should be done after running convert_raw_to_parquets.py.
 """
 
 import glob
 import pandas as pd
 from pathlib import Path
+import os
 script_path = Path(__file__).resolve()
 script_dir = script_path.parent
 
 def main():
-  base = Path("concreteness_curriculum/data/parquet/concreteness.participant")
+  base = Path(script_dir, "data/parquet/concreteness.participant")
   files = sorted(base.glob("*.parquet"))
 
   all_dfs = []
@@ -42,7 +44,10 @@ def main():
   
   print(out.head())
   print(f"{len(out)} word concreteness scores found.")
-  # out.to_parquet("data/outputs/word_concreteness_mean.parquet", index=False)
+  output_dir = Path(script_dir, "data/outputs")
+  output_dir.mkdir(parents=True, exist_ok=True)
+  out.to_parquet(Path(output_dir, "word_concreteness_mean.parquet"), index=False)
+  print(f"Dataframe downloaded to data/outputs/word_concreteness_mean.parquet")
 
 
 if __name__ == "__main__":
