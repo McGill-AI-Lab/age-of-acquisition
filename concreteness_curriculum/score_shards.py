@@ -3,6 +3,7 @@ This file scores all parquet shards inside data/corpora/,
 outputting {id, dataset, concreteness_score} where id = {dataset}-{sentenceIndex} as parquets into data/outputs/ordering
 """
 from __future__ import annotations
+import time
 
 from create_concreteness_lookup import load_concreteness_word_ratings
 SCORE_MAP = load_concreteness_word_ratings()
@@ -10,10 +11,13 @@ SCORE_MAP = load_concreteness_word_ratings()
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import wordnet
 from nltk import pos_tag
+from nltk.corpus import stopwords
 import nltk
 nltk.download('wordnet')
 nltk.download('omw-1.4')
+nltk.download('stopwords')
 lemmatizer = WordNetLemmatizer()
+english_stopwords = set(stopwords.words('english'))
 
 import pandas as pd
 import numpy as np
@@ -23,6 +27,11 @@ import re
 from pathlib import Path
 script_path = Path(__file__).resolve()
 script_dir = script_path.parent
+
+# PARAMETERS -----------------------------------------------------------
+METHOD = "min" # min, mean, or max
+LEMMATIZE = True # True = try lemmas
+SKIP_STOPWORDS = True # True = skip stopwords
 
 # Words we've already tried and failed to map (even after lemmatization)
 # Speeds up by ~ 40%
@@ -51,7 +60,12 @@ def get_wordnet_pos(tag):
     return 'n'
 
 
-def score(sentence: List, method: str = "min", lemmatize: bool = False) -> float:
+def score(
+  sentence: List,
+  method: str = METHOD,
+  lemmatize: bool = LEMMATIZE,
+  skip_stopwords: bool = SKIP_STOPWORDS
+) -> float:
   """
   Scores a sentence by concreteness score
   method can be "min", "mean", or "max"
@@ -65,6 +79,9 @@ def score(sentence: List, method: str = "min", lemmatize: bool = False) -> float
     lemmatized_sentence = []
   for i, token in enumerate(sentence):
     word = token.lower().strip()
+    if skip_stopwords:
+      if word in english_stopwords:
+        continue
     if word not in SCORE_MAP:
       if lemmatize:
         if word in unknown_cache:
@@ -102,7 +119,7 @@ def score_tokens_column(
       out[i] = -1.0
     else:
       # score() already returns -1.0 if no words are known in the sentence
-      out[i] = score(tokens, "min", True)
+      out[i] = score(tokens, "min", True, True)
   return out
 
 def parse_name(
@@ -123,7 +140,7 @@ def process_one_parquet(
   parquet_path: Path,
   output_dir: Path = Path(script_dir, "data/outputs/ordered_data"),
   tokens_column: str = "tokens"
-):
+) -> Path:
   """
   Read a single parquet shard, computer sentence scores, and write parquet with index "PPP-<rowIndex>" and columns: dataset, concreteness_score
   """
@@ -153,11 +170,25 @@ def process_one_parquet(
   out_df.to_parquet(out_path, index=True)
   return out_path
 
-# Testing
+def process_many(
+  input_glob: str = "concreteness_curriculum/data/corpora/**/*.parquet",
+  output_dir: Path = Path(script_dir, "data/outputs/ordered_data"),
+  tokens_column: str = "tokens"
+) -> None:
+  for p in sorted(Path().glob(input_glob)):
+    if p.is_file() and p.suffix == ".parquet":
+        out = process_one_parquet(p, output_dir, tokens_column)
+        print(f"Wrote {out}")
+
+
 if __name__ == "__main__":
+  """
+  start_time = time.perf_counter()
   process_one_parquet(
     Path("C:/Users/igiff/OneDrive/Desktop/Age of Acquisition/age-of-acquisition/concreteness_curriculum/data/corpora/refined-bookcorpus-dataset/refined-bookcorpus-dataset_tokens_part-006.parquet"),
   )
+  end_time = time.perf_counter()
+  print(f"Took {end_time-start_time} seconds to read one parquet.")
 
 
   df = pd.read_parquet(Path(script_dir, "data/outputs/ordered_data/refined-bookcorpus-dataset-006.parquet"))
@@ -166,3 +197,5 @@ if __name__ == "__main__":
   df2 = pd.read_parquet(Path(script_dir, "data/corpora/refined-bookcorpus-dataset/refined-bookcorpus-dataset_tokens_part-006.parquet"))
   pd.set_option('display.max_colwidth', None)
   print(df2.head())
+  """
+  process_many()
