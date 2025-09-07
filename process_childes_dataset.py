@@ -74,8 +74,11 @@ def main():
         filtered_dataset = dataset.filter(is_valid)
         print(filtered_dataset)
 
-        # Define output file path
-        output_file = os.path.join(os.path.dirname(__file__), 'childes_filtered.txt')
+        # Define output file path inside the 'data' directory
+        project_root = os.path.dirname(__file__)
+        data_dir = os.path.join(project_root, 'data')
+        os.makedirs(data_dir, exist_ok=True)
+        output_file = os.path.join(data_dir, 'childes_filtered.txt')
         
         # Save the dataset to a text file
         print(f"Saving dataset to {output_file}...")
