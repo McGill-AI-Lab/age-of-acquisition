@@ -29,8 +29,8 @@ script_path = Path(__file__).resolve()
 script_dir = script_path.parent
 
 # PARAMETERS -----------------------------------------------------------
-METHOD = "min" # min, mean, or max
-LEMMATIZE = True # True = try lemmas
+METHOD = "mean" # min, mean, or max
+LEMMATIZE = False # True = try lemmas
 SKIP_STOPWORDS = True # True = skip stopwords
 
 # Words we've already tried and failed to map (even after lemmatization)
@@ -119,7 +119,7 @@ def score_tokens_column(
       out[i] = -1.0
     else:
       # score() already returns -1.0 if no words are known in the sentence
-      out[i] = score(tokens, "min", True, True)
+      out[i] = score(tokens)
   return out
 
 def parse_name(

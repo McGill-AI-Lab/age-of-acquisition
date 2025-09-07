@@ -12,8 +12,8 @@ Build and save a histogram of concreteness scores across all scored shards.
 
 # --------------------------- Parameters --------------------------------------
 INPUT_DIR = "concreteness_curriculum/data/outputs/ordered_data"  # folder containing per-shard parquet files
-OUTPUT_PATH = "concreteness_curriculum/plots/score_distribution-MIN-LEMMATIZE-REMOVE_STOP.png"
-PARAMETER_INFO = "method=min, lemmatize=true, remove_stop=true, n_parquets=19"
+OUTPUT_PATH = "concreteness_curriculum/plots/score_distribution-MEAN-REMOVE_STOP.png"
+PARAMETER_INFO = "method=mean, lemmatize=false, remove_stop=true, n_parquets=all (refined bookcorpus)"
 
 # Histogram settings
 N_BINS = 10
