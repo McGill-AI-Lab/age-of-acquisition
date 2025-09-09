@@ -34,33 +34,39 @@ class PhonologicalComplexity:
         if not words:
             raise ValueError("Please provide a non-empty input.")
 
-        stats = PhonoStats(total_word_count=len(words))
-    
+        stats = PhonoStats()
+
         for word in words:
+            # Get list of possible pronunciations
             phones_list = pronouncing.phones_for_word(word)
+
+            # Skip words that are not recognized by the pronouncing package
             if not phones_list:
-                stats.unknown_words.append(word)
                 continue
-    
-            phonemes_str = phones_list[0] # first pronunciation
+
+            # Get the number of phonemes in the first pronunciation
+            phonemes_str = phones_list[0]
             phonemes = phonemes_str.split()
-    
             stats.phoneme_count += len(phonemes)
+
+            # Get the number of syllables + the number of words with at least 3 syllables
             syllables = pronouncing.syllable_count(phonemes_str)
             stats.syllable_count += syllables
     
             if syllables >= 3:
                 stats.long_word_count += 1
     
-            stats.known_word_count += 1
-    
+            # Get stats on consonant clusters
             clusters = cls._consonant_clusters(phonemes)
-            stats.single_consonant += clusters.count(1)
+            stats.clusters_size_1 += clusters.count(1)
             stats.clusters_size_2 += clusters.count(2)
             stats.clusters_size_3 += clusters.count(3)
-            stats.all_clusters.extend(clusters)
+            stats.total_clusters += len(clusters)
+
+            # Get known word count
+            stats.known_word_count += 1
     
-        if stats.known_word_count == 0:
+        if stats.known_word_count == 0 or stats.total_clusters == 0:
             raise ValueError("No known words found in input.")
 
         return stats

@@ -5,4 +5,3 @@ class PhonoWeights:
     CLUSTER_2 = 0.5
     CLUSTER_3 = 1.0
     CLUSTER_OVER_3 = 1.5
-    PENALTY_UNKNOWN = 0.5
