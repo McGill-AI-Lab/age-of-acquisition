@@ -6,9 +6,15 @@ from typing import Union, Iterable, Tuple, List
 
 from datasets import Dataset, DatasetDict
 
+from nltk.stem import WordNetLemmatizer
+from nltk.corpus import wordnet
+from nltk import pos_tag
 from nltk.corpus import stopwords
 import nltk
+nltk.download('wordnet')
+nltk.download('omw-1.4')
 nltk.download('stopwords')
+lemmatizer = WordNetLemmatizer()
 english_stopwords = set(stopwords.words('english'))
 
 from create_concreteness_lookup import load_concreteness_word_ratings
@@ -20,12 +26,40 @@ DB_PATH = "concreteness_curriculum/data/tmp/score_index.sqlite"   # on-disk DB f
 TEXT_COL_DEFAULT = "text"
 BATCH_COMMIT = 10_000                     # commit every N inserted rows
 METHOD = "mean"
+LEMMATIZE = True
 SKIP_STOPWORDS = True
 # ================================================================ #
 
-# --------------------------- Tokenization --------------------------- #
+# ----------------------- Lemmatizing ------------------------- #
+
+def get_lemmas(tokens: List[str]) -> List[str]:
+  """
+  Lemmatizes an entire sentence
+  """
+  lemmatized_tokens = []
+  tagged_tokens = pos_tag(tokens)
+  for word, tag in tagged_tokens:
+    lemmatized_tokens.append(lemmatizer.lemmatize(word, get_wordnet_pos(tag)))
+  return lemmatized_tokens
+
+def get_wordnet_pos(tag):
+  if tag.startswith('J'):  
+    return 'a'
+  elif tag.startswith('V'):  
+    return 'v'
+  elif tag.startswith('N'):  
+    return 'n'
+  elif tag.startswith('R'):  
+    return 'r'
+  else:
+    return 'n'
+
+
+# ----------------------- Scoring and Tokenizing ------------------------- #
+
 def score(
   sentence: List,
+  lemmatize: bool = LEMMATIZE,
   method: str = METHOD,
   skip_stopwords: bool = SKIP_STOPWORDS
 ) -> float:
@@ -38,12 +72,22 @@ def score(
   If sentence is empty or none of the words are known, returns -1
   """
   scores = []
+  if lemmatize:
+    lemmatized_sentence = []
   for i, token in enumerate(sentence):
     word = token.lower().strip()
     if skip_stopwords:
       if word in english_stopwords:
         continue
     if word not in SCORE_MAP:
+      if lemmatize:
+        if len(lemmatized_sentence) == 0:
+          lemmatized_sentence = get_lemmas([w.lower().strip() for w in sentence])
+        new_word = lemmatized_sentence[i]
+        if new_word in SCORE_MAP:
+          scores.append(SCORE_MAP[new_word])
+        else:
+          continue
       continue
     scores.append(SCORE_MAP[word])
   if len(scores) == 0:
@@ -56,9 +100,22 @@ def score(
     return max(scores)
   raise ValueError("Method should be one of 'min', 'mean', or 'max'")
 
-def tokenize(sentence: str) -> list[str]:
-    """Simple tokenizer that keeps words and common contractions."""
-    return sentence.split(' ')
+def tokenize(line: str) -> list[str]:
+    """
+    Tokenize by splitting on spaces, then:
+      - remove trailing punctuation (.,?!)
+      - remove possessive/apostrophe endings ('s or ’s)
+    """
+    tokens = line.strip().split(" ")
+    cleaned = []
+    for tok in tokens:
+        # strip .,?! from the end
+        tok = re.sub(r"[.?,!]+$", "", tok)
+        # remove possessive/apostrophe endings
+        tok = re.sub(r"(\'s|’s)$", "", tok)
+        if tok:  # keep non-empty
+            cleaned.append(tok)
+    return cleaned
 
 # ----------------------- Dataset iteration ------------------------- #
 def select_split(ds: Union[Dataset, DatasetDict], split: str = "train") -> Dataset:
@@ -206,9 +263,8 @@ def write_sorted_tokenized_output(
             """,
             (already_written,)
         ):
-            s = ds_split[int(idx)][text_col].strip()
-            toks = tokenize(s)
-            f.write(" ".join(toks) + "\n")
+            s = ds_split[int(idx)][text_col].strip() + '\n'
+            f.write(s)
             written += 1
             if (already_written + written) % 1_000_000 == 0:
                 print(f"{already_written + written} total lines present in output.")
@@ -238,8 +294,8 @@ def build_and_write_curriculum(
 
 if __name__ == "__main__":
     # Your dataset (each row has "text" = one sentence)
-    data_files = {"train": "shuffled_bookcorpus_childes.txt"}
-    dataset = load_dataset("taimaa95/AoA_corpus", data_files=data_files)
+    data_files = {"train": "refined_corpus_shuffled.txt"}
+    dataset = load_dataset("mcgillailab/aoa_sorted_curriculums", data_files=data_files)
 
     count = build_and_write_curriculum(
         dataset,
