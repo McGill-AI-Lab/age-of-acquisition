@@ -83,3 +83,7 @@ dmypy.json
 /data/training_data/
 /curriculum/
 *.txt
+
+*.png
+*.xlsx
+models/*
