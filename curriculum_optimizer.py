@@ -18,6 +18,7 @@ from scipy import stats
 from functools import lru_cache
 import spacy
 from spacy.tokens import Doc
+import gc
 import torch
 from transformers import AutoModelForMaskedLM, AutoTokenizer, AutoModelForCausalLM
 from sklearn.preprocessing import MinMaxScaler
@@ -25,6 +26,8 @@ from skopt import gp_minimize
 from skopt.space import Real
 from tqdm import tqdm
 import logging
+import pyarrow as pa
+import pyarrow.parquet as pq
 import argparse
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -55,10 +58,10 @@ def parse_args():
 
 # Feature groups and their subfeatures
 FEATURE_GROUPS = {
-    "AoA": ["max_aoa", "avg_concreteness", "word_frequency"],
+    "AoA": ["max_aoa", "avg_concreteness", "avg_word_frequency_external"],
     "Simplicity": [
         "lm_score", "char_lm_score", "sent_length", "verb_ratio", 
-        "noun_ratio", "parse_depth", "num_noun_phrases", 
+        "noun_ratio", "parse_depth", "avg_word_frequency_corpus", "num_noun_phrases", 
         "num_verb_phrases", "num_prep_phrases"
     ],
     "Diversity": [
@@ -123,7 +126,7 @@ class CurriculumOptimizer:
         self.aoa_data = self._load_aoa_data()
         
         # Initialize data
-        logger.info("Loading training data...")
+        logger.info("Streaming training data to temporary file...")
         self.data = self._load_data()
         
         # Initialize word frequencies
@@ -149,22 +152,22 @@ class CurriculumOptimizer:
             aoa_df = pd.read_excel(AOA_DATA_PATH)
             
             # Map column names to expected format
+            # Maps the expected internal name to the name found in the Excel file.
             column_map = {
-                'Word': 'word',
-                'kuperman_AoA': 'aoa',
-                'conc.M': 'concreteness',
-                'freq': 'frequency'
+                'word': 'Word',
+                'aoa': 'AoA_Kup',
+                'concreteness': 'conc.M',
+                'frequency': 'freq'
             }
             
             # Rename columns to standard names
-            aoa_df = aoa_df.rename(columns={v: k for k, v in column_map.items() 
-                                         if v in aoa_df.columns})
+            aoa_df = aoa_df.rename(columns={v: k for k, v in column_map.items() if v in aoa_df.columns})
             
             # Process the data
             aoa_data = {}
             for _, row in aoa_df.iterrows():
-                word = str(row['Word']).strip().lower()
-                if not word or pd.isna(word):
+                word = str(row['word']).strip().lower()
+                if not word or pd.isna(row.get('word')):
                     continue
                     
                 aoa_data[word] = {
@@ -180,67 +183,98 @@ class CurriculumOptimizer:
             raise ValueError(f"Error loading AoA data: {str(e)}\n"
                            f"Available columns: {aoa_df.columns.tolist()}")
     
-    def _load_data(self) -> pd.DataFrame:
-        """Load and preprocess the training data with progress tracking."""
-        from tqdm.auto import tqdm
+    def _load_data(self) -> Path:
+        """
+        Stream data from Parquet to a temporary text file to avoid loading into RAM.
 
+        Returns:
+            Path to the temporary file containing one sentence per line.
+        """
         logger.info(f"Loading training data from {TRAINING_DATA_PATH}...")
         if not TRAINING_DATA_PATH.exists():
             raise FileNotFoundError(f"Source data file not found at {TRAINING_DATA_PATH}")
 
-        # Load the data directly from the parquet file
-        try:
-            df = pd.read_parquet(TRAINING_DATA_PATH)
-            logger.info("Successfully loaded data into pandas DataFrame.")
-        except Exception as e:
-            logger.error(f"Failed to read the parquet file: {e}")
-            raise
+        # Create a temporary file to store sentences
+        with tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8', delete=False, suffix=".txt") as tmp_file:
+            temp_path = Path(tmp_file.name)
+            logger.info(f"Streaming sentences to temporary file: {temp_path}")
 
-        logger.info(f"Found {len(df):,} records in the dataset")
+            try:
+                parquet_file = pq.ParquetFile(TRAINING_DATA_PATH)
+                num_rows = parquet_file.metadata.num_rows
+                logger.info(f"Found {num_rows:,} records in the dataset.")
+
+                # Load entire parquet file into pandas DataFrame
+                # Use pyarrow to read in batches with a progress bar
+                batch_size = 100_000
+                num_batches = (parquet_file.metadata.num_rows + batch_size - 1) // batch_size
+
+                batches = [
+                    batch
+                    for batch in tqdm(
+                        parquet_file.iter_batches(batch_size=batch_size),
+                        total=num_batches,
+                        desc="Loading training data",
+                    )
+                ]
+                table = pa.Table.from_batches(batches)
+                df = table.to_pandas()
+                logger.info(f"Loaded {len(df):,} sentences into DataFrame.")
+
+                # Identify the text column
+                schema_names = df.columns.tolist()
+                text_columns = ['sentence', 'text', 'content', 'tokens']  # Added 'tokens' as it might contain text data
+                text_col = next((col for col in text_columns if col in schema_names), None)
+
+                if text_col is None and schema_names:
+                    text_col = schema_names[0]
+                    logger.info(f"Using column '{text_col}' as the text column.")
+
+                if text_col is None:
+                    raise ValueError("No suitable text column found in the input data.")
+
+                # Extract sentences from the text column
+                sentence_count = 0
+                for _, row in tqdm(df.iterrows(), total=len(df), desc="Writing sentences to temp file"):
+                    sentence = row[text_col]
+
+                    # Handle different data types
+                    if isinstance(sentence, list):
+                        # If it's a list of tokens, join them into a sentence
+                        sentence = ' '.join(str(token) for token in sentence if token)
+                    elif pd.isna(sentence):
+                        continue  # Skip NaN values
+
+                    # Ensure sentence is a string and write it
+                    tmp_file.write(str(sentence).strip() + '\n')
+                    sentence_count += 1
+
+            except Exception as e:
+                logger.error(f"Failed to load the parquet file: {e}")
+                raise
+
+        logger.info(f"Successfully streamed {sentence_count:,} sentences to {temp_path}")
+        return temp_path
         
-        # Ensure we have a valid text column
-        text_columns = ['sentence', 'text', 'content', 'tokens']
-        text_col = next((col for col in text_columns if col in df.columns), None)
-        
-        if text_col is None and len(df.columns) > 0:
-            # If no standard text column found but we have data, use the first string column
-            for col in df.columns:
-                if df[col].dtype == 'object':
-                    text_col = col
-                    logger.info(f"Using column '{text_col}' as the text column")
-                    break
-        
-        if text_col is None:
-            raise ValueError("No suitable text column found in the input data")
-        
-        # Rename the text column to 'sentence' for consistency if needed
-        if text_col != 'sentence':
-            logger.info(f"Renaming column '{text_col}' to 'sentence'")
-            df = df.rename(columns={text_col: 'sentence'})
-        
-        # Add sentence IDs
-        with tqdm(total=1, desc="Indexing", bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}'):
-            df['sentence_id'] = df.index
-        
-        logger.info(f"Successfully loaded {len(df):,} sentences")
-        return df
-        
+    def _count_lines(self, filepath: Path) -> int:
+        """Efficiently count the number of lines in a file."""
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return sum(1 for _ in f)
+
     def _compute_word_frequencies(self):
         """Compute word frequencies across the corpus."""
         from collections import defaultdict
         
-        if 'sentence' not in self.data.columns:
-            raise ValueError("No 'sentence' column found in the data. Available columns: " 
-                           f"{self.data.columns.tolist()}")
-        
-        # Ensure we're working with strings
-        sentences = self.data['sentence'].astype(str)
-        
         word_counts = defaultdict(int)
-        for doc in self.nlp.pipe(sentences, batch_size=1000):
-            for token in doc:
-                if token.is_alpha:
-                    word_counts[token.text.lower()] += 1
+        # Get total number of sentences for a proper progress bar
+        num_sentences = self._count_lines(self.data)
+
+        with open(self.data, 'r', encoding='utf-8') as f:
+            # Use nlp.pipe for efficient processing of a stream of texts
+            for doc in tqdm(self.nlp.pipe(f, batch_size=1000), total=num_sentences, desc="Computing word frequencies"):
+                for token in doc:
+                    if token.is_alpha:
+                        word_counts[token.text.lower()] += 1
         
         if not word_counts:
             raise ValueError("No valid words found in the input data")
@@ -280,7 +314,7 @@ class CurriculumOptimizer:
                 # Use mean of last hidden state as sentence embedding
                 last_hidden = outputs.hidden_states[-1]
                 attention_mask = inputs['attention_mask'].unsqueeze(-1)
-                mean_embedding = (last_hidden * attention_mask).sum(dim=1) / attention_mask.sum(dim=1)
+                mean_embedding = (last_hidden * attention_mask).sum(dim=1) / attention_mask.sum(dim=1).unsqueeze(-1)
                 embeddings.append(mean_embedding.cpu())
         
         # Stack all embeddings
@@ -308,8 +342,12 @@ class CurriculumOptimizer:
         bottom_indices = scores.nsmallest(k).index
         
         # Get embeddings for selected sentences
-        all_docs = list(self.nlp.pipe(self.data['sentence'], batch_size=1000))
-        embeddings = self._get_sentence_embeddings(all_docs)
+        with open(self.data, 'r', encoding='utf-8') as f:
+            all_sentences = f.readlines()
+        
+        # This part still requires loading sentences for spacy, but it's more controlled.
+        all_docs = list(self.nlp.pipe(all_sentences, batch_size=1000))
+        embeddings = self._get_sentence_embeddings(all_docs) # This uses its own cache
         
         # Select embeddings for drift computation
         top_embeddings = embeddings[top_indices]
@@ -333,9 +371,14 @@ class CurriculumOptimizer:
     def compute_all_features(self):
         """Compute all features for the dataset."""
         logger.info("Computing features...")
-        
+
+        # Get total number of sentences for a proper progress bar
+        num_sentences = self._count_lines(self.data)
+
         # Process sentences with spaCy
-        docs = list(self.nlp.pipe(tqdm(self.data['sentence'], desc="Processing sentences")))
+        with open(self.data, 'r', encoding='utf-8') as f:
+            # nlp.pipe can take an iterator, which is memory-efficient
+            docs = list(self.nlp.pipe(tqdm(f, total=num_sentences, desc="Processing sentences"), batch_size=1000))
         
         # Compute features
         features = {}
@@ -366,7 +409,7 @@ class CurriculumOptimizer:
         features = {
             'max_aoa': [],
             'avg_concreteness': [],
-            'word_frequency': []
+            'avg_word_frequency_external': []
         }
         
         for doc in docs:
@@ -381,9 +424,9 @@ class CurriculumOptimizer:
                     concreteness_scores.append(self.aoa_data[word]['concreteness'])
                     freq_scores.append(self.aoa_data[word]['frequency'])
             
-            features['max_aoa'].append(max(aoa_scores) if aoa_scores else 0)
-            features['avg_concreteness'].append(np.mean(concreteness_scores) if concreteness_scores else 0)
-            features['word_frequency'].append(np.mean(freq_scores) if freq_scores else 0)
+            features['max_aoa'].append(float(max(aoa_scores)) if aoa_scores else 0.0)
+            features['avg_concreteness'].append(float(np.mean(concreteness_scores)) if concreteness_scores else 0.0)
+            features['avg_word_frequency_external'].append(float(np.mean(freq_scores)) if freq_scores else 0.0)
         
         return features
     
@@ -393,6 +436,7 @@ class CurriculumOptimizer:
             'sent_length': [],
             'verb_ratio': [],
             'noun_ratio': [],
+            'avg_word_frequency_corpus': [],
             'parse_depth': [],
             'num_noun_phrases': [],
             'num_verb_phrases': [],
@@ -406,8 +450,13 @@ class CurriculumOptimizer:
             # POS-based features
             verbs = [token for token in doc if token.pos_ == 'VERB']
             nouns = [token for token in doc if token.pos_ == 'NOUN']
-            features['verb_ratio'].append(len(verbs) / len(doc) if doc else 0)
-            features['noun_ratio'].append(len(nouns) / len(doc) if doc else 0)
+            features['verb_ratio'].append(len(verbs) / len(doc) if len(doc) > 0 else 0.0)
+            features['noun_ratio'].append(len(nouns) / len(doc) if len(doc) > 0 else 0.0)
+
+            # Corpus-based word frequency
+            words = [token.text.lower() for token in doc if token.is_alpha]
+            corpus_freqs = [self.word_freq.get(w, 0) for w in words]
+            features['avg_word_frequency_corpus'].append(np.mean(corpus_freqs) if corpus_freqs else 0.0)
             
             # Parse tree depth
             if len(doc) > 0:
@@ -494,9 +543,9 @@ class CurriculumOptimizer:
                     
                     # Convert to probabilities and average (handling padding tokens)
                     valid_tokens = (shift_labels != self.lm_tokenizer.pad_token_id).float()
-                    if valid_tokens.sum() > 0:
-                        avg_log_prob = (-loss * valid_tokens).sum() / valid_tokens.sum()
-                        scores.append(avg_log_prob.item())
+                    if valid_tokens.sum().item() > 0:
+                        avg_log_prob = (-loss * valid_tokens).sum().item() / valid_tokens.sum().item()
+                        scores.append(avg_log_prob)
                     else:
                         scores.append(0.0)
                         
@@ -545,9 +594,12 @@ class CurriculumOptimizer:
                         reduction='none'
                     )
                     
-                    # Average log prob per character (excluding padding)
-                    avg_log_prob = log_probs.mean().item()
-                    scores.append(avg_log_prob)
+                    # Average log prob per character, if any valid log probs exist
+                    if log_probs.numel() > 0:
+                        avg_log_prob = log_probs.mean().item()
+                        scores.append(avg_log_prob)
+                    else:
+                        scores.append(0.0)
                     
                 except Exception as e:
                     logger.warning(f"Error processing sentence (char-level): {e}")
@@ -691,15 +743,22 @@ class CurriculumOptimizer:
         )
         
         # Add scores to data and sort
-        self.data['score'] = final_scores
-        ranked_data = self.data.sort_values('score', ascending=False)
+        with open(self.data, 'r', encoding='utf-8') as f:
+            sentences = [line.strip() for line in f]
+        
+        # Create a DataFrame for sorting and saving
+        ranked_df = pd.DataFrame({
+            'sentence': sentences,
+            'score': final_scores
+        })
+        ranked_df = ranked_df.sort_values('score', ascending=False)
         
         # Save results
-        ranked_data.to_csv(OUTPUT_PATH, index=False)
+        ranked_df.to_csv(OUTPUT_PATH, index=False)
         
         # Print top 10 sentences
         print("\nTop 10 Ranked Sentences:")
-        for i, (_, row) in enumerate(ranked_data.head(10).iterrows(), 1):
+        for i, (_, row) in enumerate(ranked_df.head(10).iterrows(), 1):
             print(f"{i}. [{row['score']:.4f}] {row['sentence']}")
         
         print(f"\nFull curriculum saved to: {OUTPUT_PATH}")
