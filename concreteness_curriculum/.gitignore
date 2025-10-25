@@ -1,0 +1,5 @@
+__pycache__/
+data/
+tests/
+testing.py
+!data/outputs/word_concreteness_mean.parquet
