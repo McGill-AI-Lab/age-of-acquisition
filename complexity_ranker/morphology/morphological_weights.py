@@ -1,0 +1,4 @@
+class MorphoWeights:
+    MEAN_MORPHEMES = 1.2
+    PERCENT_COMPLEX = 0.8
+    AVG_INFLECTIONAL_VARIANTS = 1.0
