@@ -1,2 +1,0 @@
-Add your contributuions in the following manner: 
-05.08.2025: Aaron implemented Bayesian Optimization of curriculum for word2vec training that searches through different order of sentences in the corpus, to find thecurriculum order that maximizes for Sim-Lex999 Metric. 

@@ -78,8 +78,6 @@ dmypy.json
 
 # Generated data and curriculum files
 /data/childes_filtered.txt
-/data/raw/
-/data/processed/
 /data/training_data/
 /curriculum/
 *.txt
