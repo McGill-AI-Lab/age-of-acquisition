@@ -1,0 +1,11 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lexical_features"
+version = "0.1.0"
+dependencies = ["pandas", "pyarrow", "wordfreq", "pronouncing"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
