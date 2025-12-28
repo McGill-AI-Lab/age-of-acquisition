@@ -32,10 +32,12 @@
 
     # age of acquisition
     print(aoa("dog"))
+    print(aoa("abandoning", inflect=True))
 
     # concreteness (supports multiword expressions)
     print(conc("dog"))
     print(conc("bite the bullet"))
+    print(conc("dogs", inflect=True))
 
     # word frequency
     print(freq("dog"))
@@ -58,6 +60,6 @@
     ...
 
 5. Additional notes
-    * Inflectional variants already added to datasets
+    * Inflectional variants already added to AoA and Conc datasets and can be turned on with the `inflect` optional argument 
     * Ineligible words like stopwords are still scored; remove them in
       sentence level scoring if desired

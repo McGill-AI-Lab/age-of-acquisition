@@ -19,6 +19,8 @@ _VOWEL_RE = re.compile(r"\d$")
 # caches that hold tables
 _AOA_LOOKUP: dict[str, float] | None = None
 _CONC_LOOKUP: dict[str, float] | None = None
+_AOA_LOOKUP_INFLECTED: dict[str, float] | None = None
+_CONC_LOOKUP_INFLECTED: dict[str, float] | None = None
 
 # loads a table into a dictionary
 def _load_lookup(parquet_path: str | Path) -> dict[str, float]:
@@ -32,24 +34,34 @@ def _load_lookup(parquet_path: str | Path) -> dict[str, float]:
     if pd.notna(w) and pd.notna(v)
   }
 
-def aoa(word: str) -> float:
-  global _AOA_LOOKUP
+def aoa(word: str, inflect: bool = False) -> float:
+  global _AOA_LOOKUP, _AOA_LOOKUP_INFLECTED
+  if word is None:
+    return -1.0
+  key = str(word).strip().lower()
+
+  if inflect:
+    if _AOA_LOOKUP_INFLECTED is None:
+      _AOA_LOOKUP_INFLECTED = _load_lookup(TABLE_DIR / "aoa_table_inflected.parquet")
+    return float(_AOA_LOOKUP_INFLECTED.get(key, -1.0))
+
   if _AOA_LOOKUP is None:
     _AOA_LOOKUP = _load_lookup(TABLE_DIR / "aoa_table.parquet")
-  
-  if word is None:
-    return -1.0
-  key = str(word).strip().lower()
   return float(_AOA_LOOKUP.get(key, -1.0))
 
-def conc(word: str) -> float:
-  global _CONC_LOOKUP
-  if _CONC_LOOKUP is None:
-    _CONC_LOOKUP = _load_lookup(TABLE_DIR / "conc_table.parquet")
-  
+def conc(word: str, inflect: bool = False) -> float:
+  global _CONC_LOOKUP, _CONC_LOOKUP_INFLECTED
   if word is None:
     return -1.0
   key = str(word).strip().lower()
+
+  if inflect:
+    if _CONC_LOOKUP_INFLECTED is None:
+      _CONC_LOOKUP_INFLECTED = _load_lookup(TABLE_DIR / "conc_table_inflected.parquet")
+    return float(_CONC_LOOKUP_INFLECTED.get(key, -1.0))
+
+  if _CONC_LOOKUP is None:
+    _CONC_LOOKUP = _load_lookup(TABLE_DIR / "conc_table.parquet")
   return float(_CONC_LOOKUP.get(key, -1.0))
 
 def freq(word: str) -> float:

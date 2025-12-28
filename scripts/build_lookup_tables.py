@@ -10,9 +10,13 @@ from lexical_features import *
 print(f'aoa("hello") -> {aoa("hello")}')
 print(f'aoa("dog") -> {aoa("dog")}')
 print(f'aoa("unforgiving") -> {aoa("unforgiving")}')
+print(f'aoa("aardvarks", inflect=True) -> {aoa("aardvarks", inflect=True)}')
+print(f'aoa("aardvarks", inflect=False) -> {aoa("aardvarks", inflect=False)}')
 
 print(f'conc("dog") -> {conc("dog")}')
 print(f'conc("bite the bullet") -> {conc("bite the bullet")}')
+print(f'conc("aardvarks", inflect=True) -> {conc("aardvarks", inflect=True)}')
+print(f'conc("aardvarks", inflect=False) -> {conc("aardvarks", inflect=False)}')
 
 print(f'freq("dog") -> {freq("dog")}') 
 print(f'freq("unforgiving") -> {freq("unforgiving")}')
