@@ -16,6 +16,8 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd 
 
+from lexical_features.inflections import add_inflections
+
 PKG_DIR = Path(__file__).resolve().parent
 TABLE_DIR = PKG_DIR.parent.parent / "data" / "processed" / "lookup_tables"
 DATA_DIR = PKG_DIR.parent.parent / "data" / "raw" / "lexical_norms"
@@ -109,8 +111,9 @@ def main(d1_path: str = DATA_DIR / "KupermanAoA.xlsx", d2_path: str = DATA_DIR /
   # print(f"Words in D2 but not in D1: {len(missing_in_d1)}")
   
   combined = build_and_save_aoa_table(d1, d2, out_parquet = TABLE_DIR / "aoa_table.parquet")
+  combined = add_inflections(combined)
+  combined.to_parquet(TABLE_DIR / "aoa_table_inflected.parquet", index=False)
 
-  # print(f"Words in combined: {len(combined)}")
 
   return combined
 

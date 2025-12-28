@@ -18,13 +18,15 @@ for p in req_datasets:
     raise FileNotFoundError(f"{p} is missing.")
   
 aoa_parquet = TABLE_DIR / "aoa_table.parquet"
+aoa_parquet_inflected = TABLE_DIR / "aoa_table_inflected.parquet"
 conc_parquet = TABLE_DIR / "conc_table.parquet"
+conc_parquet_inflected = TABLE_DIR / "conc_table_inflected.parquet"
 
-if not aoa_parquet.is_file():
+if not aoa_parquet.is_file() or not aoa_parquet_inflected.is_file():
     from . import load_aoa
     load_aoa.main()
 
-if not conc_parquet.is_file():
+if not conc_parquet.is_file() or not conc_parquet_inflected.is_file():
     from . import load_conc
     load_conc.main()
 
