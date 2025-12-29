@@ -35,8 +35,8 @@
     ```python
     from preprocessing import *
 
-    # Convert BabyLM and Refined Book Corpus into shards
+    # Convert BabyLM and % of Refined Book Corpus into shards (default: n_shards=100, percent_refined=10)
     # Output in data/processed/corpora/raw_shards
     # May take a while; refined book corpus is being split by sentence using spacy
-    load_corpus_shards()
+    load_corpus_shards(n_shards=100, percent_refined=10)
     ```
