@@ -43,15 +43,15 @@ def _iter_train_lines(train_path: Path) -> Iterator[str]:
       if text:
         yield text
 
-# streams lines from all babylm texts
+# streams lines from all babylm texts (lowercase)
 def _iter_babylm_texts() -> Iterator[str]:
   train_files: List[Path] = sorted(BABYLM_DIR.glob("*.train"))
   if not train_files:
     raise FileNotFoundError(f"No files found in {BABYLM_DIR}")
   
   for fp in train_files:
-    yield from _iter_train_lines(fp)
-
+    for line in _iter_train_lines(fp):
+      yield line.lower()  
 
 # streams sentences from refined book corpus
 # uses spacy to split paragraphs into sentences

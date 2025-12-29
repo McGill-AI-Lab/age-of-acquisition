@@ -40,3 +40,8 @@
     # May take a while; refined book corpus is being split by sentence using spacy
     load_corpus_shards(n_shards=100, percent_refined=10)
     ```
+
+3. Notes
+    - All words are lowercase
+    - Each line is a sentence
+    - There is punctuation
