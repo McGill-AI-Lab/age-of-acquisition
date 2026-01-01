@@ -33,7 +33,11 @@ For a given word $w$:
 * Compute the proportion of shared neighbors.
 
 Formally, for neighbors sets $N_i(w)$ and $N_j(w)$:
-$$\text{overlap}(w) = \frac{|N_i(w) \cap N_j(w)|}{k}$$
+
+```math
+\text{overlap}(w) = \frac{|N_i(w) \cap N_j(w)|}{k}
+```
+
 This value ranges from 0 to 1.
 
 This metric captures local representational stability:
@@ -48,7 +52,10 @@ Pairwise stability aggregates nearest-neighbor overlap:
 * Across all unique pairs of training runs.
 
 For each pair of runs:
-$$\text{stability}_{i, j} = \frac{1}{|V|} \Sigma_{w \in V} \text{overlap}_{i, j}(w)$$
+
+```math
+\text{stability}_{i, j} = \frac{1}{|V|} \Sigma_{w \in V} \text{overlap}_{i, j}(w)
+```
 
 This metric captures global stability of the embedding space:
 * It reflects whether the model converges to a consistent solution when trained multiple times under identical conditions.
@@ -90,7 +97,11 @@ This allows testing whether stability effects are driven by a small subset of fr
 Word cohort movement measures how much the embedding vector of a word moves over time after it is introduced.
 
 For each word:
-$$\text{movement}_t = 1 - \cos(v_{t - 1}, v_t)$$
+
+```math
+\text{movement}_t = 1 - \cos(v_{t - 1}, v_t)
+```
+
 This is computed between consecutive tranches.
 
 This metric captures semantic drift:
