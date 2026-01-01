@@ -15,6 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 
+from lexical_features.inflections import add_inflections
+
 PKG_DIR = Path(__file__).resolve().parent
 TABLE_DIR = PKG_DIR.parent.parent / "data" / "processed" / "lookup_tables"
 DATA_DIR = PKG_DIR.parent.parent / "data" / "raw" / "lexical_norms"
@@ -68,8 +70,8 @@ def main(d1_path: str = DATA_DIR / "BrysbaertConc.xlsx", d2_path: str = DATA_DIR
   # print(f"Words in D2: {len(d2)}")
   
   combined = build_and_save_conc_table(d1, d2, output_parquet = TABLE_DIR / "conc_table.parquet")
-
-  # print(f"Words in combined: {len(combined)}")
+  combined = add_inflections(combined, eps=-1e-5)
+  combined.to_parquet(TABLE_DIR / "conc_table_inflected.parquet", index=False)
 
   return combined
 

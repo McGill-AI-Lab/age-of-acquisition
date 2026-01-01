@@ -3,9 +3,17 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lexical_features"
+name = "age_of_acquisition"
 version = "0.1.0"
-dependencies = ["pandas", "pyarrow", "wordfreq", "pronouncing"]
+dependencies = [
+  "pandas",
+  "pyarrow",
+  "wordfreq",
+  "pronouncing",
+  "lemminflect",
+  "spacy",
+  "tqdm",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
