@@ -34,7 +34,7 @@ def write_sentence_based_tranches(
     table = pa.Table.from_pylist(rows)
     pq.write_table(table, (tdir / "data.parquet").as_posix())
 
-  pbar = tqdm(units="rows", desc="Tranching (sentence-based)")
+  pbar = tqdm(unit="rows", desc="Tranching (sentence-based)")
   for row in _iter_ordered_rows(ordered_parquet):
     buffer.append(row)
     pbar.update(1)

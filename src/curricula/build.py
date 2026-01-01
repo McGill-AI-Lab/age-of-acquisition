@@ -35,7 +35,7 @@ def build_curriculum(
   multiword: bool = False,
   skip_stopwords: bool = False,
   inflect: bool = False,
-) -> Path: # output path where curriculum was built
+) -> str: # output curriculum index (numeric prefix of the output folder)
   if tranche_size <= 0:
     raise ValueError("tranche_size must be > 0")
 
@@ -48,7 +48,7 @@ def build_curriculum(
   OUT_BASE.mkdir(parents=True, exist_ok=True)
 
   # create out directory with parameters in folder name
-  out_dir = make_curriculum_dir(
+  curr_idx, out_dir = make_curriculum_dir(
     out_base=OUT_BASE,
     curriculum=curriculum,
     scoring_method=scoring_method,
@@ -81,6 +81,7 @@ def build_curriculum(
     "multiword": multiword,
     "skip_stopwords": skip_stopwords,
     "inflect": inflect,
+    "curriculum_index": curr_idx,
   }
 
   # seed for shuffled curriculum
@@ -197,9 +198,9 @@ def build_curriculum(
   write_config_json(out_dir / "config.json", meta)
 
   # UNCOMMENT TO DELETE TEMP DIR
-  # shutil.rmtree(run_dir, ignore_errors=True)
+  shutil.rmtree(run_dir, ignore_errors=True)
 
-  return out_dir
+  return curr_idx
 
 
 def _score_sentence_for_curriculum(

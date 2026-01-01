@@ -28,7 +28,10 @@ def make_curriculum_dir(
   multiword: bool,
   skip_stopwords: bool,
   inflect: bool,
-) -> Path:
+) -> tuple[str, Path]:
+  """
+  Returns (idx, out_dir)
+  """
   idx = _next_index(out_base)
   name = (
     f"{idx:03d}"
@@ -42,7 +45,7 @@ def make_curriculum_dir(
     f"__skipStop={int(skip_stopwords)}"
     f"__inflect={int(inflect)}"
   )
-  return Path(out_base) / name
+  return str(idx), Path(out_base) / name
 
 def make_run_dir(out_dir: Path) -> Path:
   return Path(out_dir) / "_run"

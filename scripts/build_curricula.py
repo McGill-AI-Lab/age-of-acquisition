@@ -1,6 +1,11 @@
-from curricula import build_curriculum
+"""
+  This file shows how to build, validate, and shuffle curricula.
+"""
 
-out = build_curriculum(
+from curricula import *
+
+# build the curriculum into data/processe/corpora/training/
+idx = build_curriculum(
   curriculum="aoa",
   scoring_method="max",
   sort_order="asc",
@@ -12,4 +17,15 @@ out = build_curriculum(
   inflect=True
 )
 
-print(out)
+# curriculum index
+print(idx)
+
+# display tranche sized (must exit to continue script)
+plot_tranche_sizes(idx)
+
+# write samples.txt
+write_samples(idx)
+
+# shuffle the tranches in-place
+# done before training
+shuffle_tranches(idx)
