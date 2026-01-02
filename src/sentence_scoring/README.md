@@ -16,7 +16,7 @@
   - One of: "aoa", "conc", "phon", "freq".
 - `multiword: bool`
   - If True and metric == "conc", attempt greedy multiword matching (longest-first, left-to-right). Otherwise score token-by-token.
-- `method: str`:
+- `method: str`
   - Aggregation method:
     - "mean": mean of eligible units, witness = ""
     - "max": max eligible unit score, witness = unit
@@ -25,7 +25,7 @@
 - `skip_stopwords: bool`
   - If True, stopwords are ignored for scoring except:
     - In (metric="conc", multiword=True), stopwords are still allowed *inside* expressions and may begin an expression; but if no expression begins at a stopword, that stopword is ignored alone.
-- `inflect: bool`:
+- `inflect: bool`
   - If True, pass inflect=True into aoa() and conc(). Ignored for phon() and freq().
 
 ## Returns
@@ -35,8 +35,8 @@
 
 ## Examples:
   ```python
-  from sentence_scoring import *
-  from lexical_features import *
+  from sentence_scoring import * # for score_sentence()
+  from lexical_features import * # for conc()
 
   # scoring sentence based on mean concreteness while attempting multiwords, skipping stopwords, and using the inflected lookup table
   output = score_sentence(
