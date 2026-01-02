@@ -3,16 +3,20 @@
 Train Word2Vec on tranche-based curriculum and save embeddings per tranche.
 
 This script:
-1. Reads parquet shards from data/processed/corpora/curricula where each shard
-   represents one tranche (a set of sentences)
+1. Reads tranches from a curriculum directory (e.g., data/processed/corpora/training/000__.../tranches)
+   Each tranche is a subdirectory (tranche_0001/, tranche_0002/, ...) containing data.parquet
 2. Trains a single Word2Vec model on the entire corpus
 3. Saves word embeddings organized by tranche - one parquet file per tranche
    containing all word embeddings that appear in that tranche
 
 Expected input format:
-    Each tranche parquet file should contain a 'text' or 'tokens' column.
-    - If 'text': sentences as strings (will be tokenized)
-    - If 'tokens': pre-tokenized lists of strings
+    Curriculum directory structure:
+        input_dir/
+        ├── tranche_0001/
+        │   └── data.parquet  (columns: sentence, value)
+        ├── tranche_0002/
+        │   └── data.parquet
+        └── ...
 
 Output format:
     One parquet file per tranche saved to the output directory with schema:
@@ -28,15 +32,15 @@ Hyperparameters (defaults):
     - Learning rate: 0.025 (fixed, no decay)
 
 Example usage:
-    # Train with 300-dimensional vectors
+    # Train with 300-dimensional vectors on AoA curriculum
     python -m src.training.train_word2vec_tranches \
-        --input_dir data/processed/corpora/curricula \
-        --output_dir outputs/embeddings/tranches_300d
+        --input_dir "data/processed/corpora/training/000__curr=aoa__method=max__order=asc__tranche=word-based__size=500__aoaAgn=1__mw=0__skipStop=1__inflect=1/tranches" \
+        --output_dir outputs/embeddings/aoa_300d
 
     # Train with 50-dimensional vectors
     python -m src.training.train_word2vec_tranches \
-        --input_dir data/processed/corpora/curricula \
-        --output_dir outputs/embeddings/tranches_50d \
+        --input_dir "data/processed/corpora/training/000__curr=aoa__method=max__order=asc__tranche=word-based__size=500__aoaAgn=1__mw=0__skipStop=1__inflect=1/tranches" \
+        --output_dir outputs/embeddings/aoa_50d \
         --vector_size 50
 """
 from __future__ import annotations
@@ -65,26 +69,34 @@ def simple_tokenize(text: str) -> list[str]:
 
 def discover_tranches(input_dir: Path) -> list[Path]:
     """
-    Discover tranche parquet files in the input directory.
+    Discover tranche directories in the input directory.
     
-    Returns files sorted by name to ensure consistent tranche ordering.
+    Expects structure: input_dir/tranche_XXXX/data.parquet
+    Returns paths to data.parquet files sorted by tranche number.
     """
-    parquet_files = sorted(input_dir.glob("*.parquet"))
+    # Look for tranche_XXXX directories
+    tranche_dirs = sorted(input_dir.glob("tranche_*"))
     
-    if not parquet_files:
-        # Check for partitioned dataset (directory with part-*.parquet files)
-        part_dirs = sorted([d for d in input_dir.iterdir() if d.is_dir()])
-        parquet_files = part_dirs if part_dirs else []
+    if not tranche_dirs:
+        # Fallback: check for direct parquet files
+        parquet_files = sorted(input_dir.glob("*.parquet"))
+        return parquet_files
     
-    return parquet_files
+    # Return paths to data.parquet within each tranche directory
+    tranche_parquets = []
+    for tranche_dir in tranche_dirs:
+        data_parquet = tranche_dir / "data.parquet"
+        if data_parquet.exists():
+            tranche_parquets.append(data_parquet)
+    
+    return tranche_parquets
 
 
 def read_tranche_sentences(tranche_path: Path) -> Iterator[list[str]]:
     """
     Read sentences from a tranche parquet file.
     
-    Handles both 'text' column (strings to tokenize) and 'tokens' column
-    (pre-tokenized lists).
+    Handles 'sentence', 'text', or 'tokens' columns.
     """
     if tranche_path.is_dir():
         # Partitioned dataset
@@ -101,6 +113,14 @@ def read_tranche_sentences(tranche_path: Path) -> Iterator[list[str]]:
         for tokens in tokens_list:
             if tokens:
                 yield [t.lower() for t in tokens]
+    elif "sentence" in columns:
+        # Curriculum format: 'sentence' column
+        texts = table.column("sentence").to_pylist()
+        for text in texts:
+            if text:
+                tokens = simple_tokenize(text)
+                if tokens:
+                    yield tokens
     elif "text" in columns:
         # Raw text to tokenize
         texts = table.column("text").to_pylist()
@@ -111,7 +131,7 @@ def read_tranche_sentences(tranche_path: Path) -> Iterator[list[str]]:
                     yield tokens
     else:
         raise ValueError(
-            f"Tranche {tranche_path} has no 'text' or 'tokens' column. "
+            f"Tranche {tranche_path} has no 'sentence', 'text', or 'tokens' column. "
             f"Found columns: {columns}"
         )
 
@@ -171,8 +191,8 @@ def main():
     parser.add_argument(
         "--input_dir",
         type=str,
-        default="data/processed/corpora/curricula",
-        help="Directory containing tranche parquet shards.",
+        default="data/processed/corpora/training/000__curr=aoa__method=max__order=asc__tranche=word-based__size=500__aoaAgn=1__mw=0__skipStop=1__inflect=1/tranches",
+        help="Directory containing tranche subdirectories (tranche_0001/, tranche_0002/, ...).",
     )
     parser.add_argument(
         "--output_dir",
@@ -250,9 +270,10 @@ def main():
         logging.error(f"No parquet files found in {input_dir}")
         return
     
-    logging.info(f"Found {len(tranche_paths)} tranches:")
-    for i, path in enumerate(tranche_paths):
-        logging.info(f"  Tranche {i}: {path.name}")
+    logging.info(f"Found {len(tranche_paths)} tranches")
+    if len(tranche_paths) <= 10:
+        for i, path in enumerate(tranche_paths):
+            logging.info(f"  Tranche {i}: {path.parent.name}/{path.name}")
     
     # Create corpus iterator
     corpus = TrancheCorpusIterator(tranche_paths)
@@ -292,7 +313,8 @@ def main():
     logging.info("Extracting embeddings per tranche...")
     
     for i, tranche_path in enumerate(tqdm(tranche_paths, desc="Processing tranches")):
-        tranche_name = tranche_path.stem if tranche_path.is_file() else tranche_path.name
+        # Use parent directory name (e.g., tranche_0001) as the tranche name
+        tranche_name = tranche_path.parent.name if tranche_path.name == "data.parquet" else tranche_path.stem
         
         # Collect vocabulary for this tranche
         tranche_vocab = collect_tranche_vocabulary(tranche_path)
@@ -307,16 +329,11 @@ def main():
         # Extract embeddings
         embeddings = np.array([model.wv[w] for w in words_in_model])
         
-        # Save to parquet
-        output_path = output_dir / f"tranche_{i:04d}_{tranche_name}.parquet"
+        # Save to parquet - use tranche name directly (e.g., tranche_0001.parquet)
+        output_path = output_dir / f"{tranche_name}.parquet"
         save_embeddings_parquet(words_in_model, embeddings, output_path)
-        
-        logging.info(
-            f"Tranche {i} ({tranche_name}): "
-            f"{len(words_in_model):,} words saved to {output_path.name}"
-        )
     
-    logging.info("Done!")
+    logging.info(f"Done! Saved {len(tranche_paths)} tranche embeddings to {output_dir}")
 
 
 if __name__ == "__main__":
