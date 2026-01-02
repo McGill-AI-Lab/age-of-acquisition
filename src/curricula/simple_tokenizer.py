@@ -1,5 +1,5 @@
 """
-  Same tokenizer found in sentence_scoring
+  Only used when outputting list of words in each tranche for word-based tranches.
 """
 
 from __future__ import annotations

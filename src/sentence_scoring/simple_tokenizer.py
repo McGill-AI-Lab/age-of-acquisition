@@ -1,5 +1,6 @@
 """
-  Extracts word-like tokens and keeps apostrophes inside words.
+  Extracts word-like tokens.
+  Keeps apostrophes except for 's, in which case it is removed.
   Assumes input is already lowercase with punctuation present.
 """
 
@@ -13,4 +14,5 @@ def simple_tokenize(sentence: str) -> List[str]:
   Tokenize a sentence into word-like tokens.
   Example: "this is a sentence." -> ["this", "is", "a", "sentence"]
   """
-  return _TOKEN_RE.findall(sentence)
+  tokens = _TOKEN_RE.findall(sentence)
+  return [t[:-2] if t.endswith("'s") else t for t in tokens]

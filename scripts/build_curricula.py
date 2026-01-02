@@ -4,7 +4,7 @@
 
 from curricula import *
 
-# build the curriculum into data/processe/corpora/training/
+# build the curriculum into data/processed/corpora/training/
 idx = build_curriculum(
   curriculum="aoa",
   scoring_method="max",

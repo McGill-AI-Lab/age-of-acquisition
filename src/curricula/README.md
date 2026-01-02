@@ -12,6 +12,7 @@
 
 3. Usage
     - The curriculum is outputted into `data/processed/corpora/training/NAME/`, where NAME has an index and a list of parameters.
+    - May look something like: `000__curr=aoa__method=max__order=asc__tranche=word-based__size=500__aoaAgn=1__mw=0__skipStop=1__inflect=1`
     - This folder contains a `config.json` file with run configuration and basic statistics, a `tranches/` folder with `tranche_0001/`... folders containing `data.parquet` with columns `sentence` and `value`. For word-based tranches, `new_words.txt` within each tranche folder contains the 500 new words added with each tranche.
     - For more details about certain parameters, see `src/sentence_scoring/README.md`
 
@@ -19,7 +20,7 @@
     from curricula import build_curriculum
     from curricula import shuffle_tranches
 
-    build_curriculum(
+    idx: int = build_curriculum(
       curriculum: str = "shuffled" | "aoa" | "conc" | "freq" | "phon",
       scoring_method: str = "mean" | "min" | "max" | "add",
       sort_order: str = "asc" | "desc",
@@ -29,10 +30,10 @@
       multiword: bool = False,
       skip_stopwords: bool = False,
       inflect: bool = True
-    ) -> pathlib.Path
+    )
 
     # before training, shuffle within tranches in-place
-    shuffle_tranches("0") # input string is curriculum index
+    shuffle_tranches(idx) # input string is curriculum index
     ```
 
 4. Analytics
@@ -51,8 +52,3 @@
 4. Extra Details
     - `aoa_agnostic` only applies when `curriculum` is one of `conc|freq|phon`. When True, score sentence directly using selected metric. When False, score based on max-AoA word in the sentence.
     - Do not rename curriculum folder names! They are used by plotting, sampling, and shuffling.
-
-To do:
-- preprocess babylm
-- apostrophes
-- check over all files and readme's
