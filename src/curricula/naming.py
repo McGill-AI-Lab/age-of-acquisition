@@ -31,19 +31,25 @@ def make_curriculum_dir(
 ) -> tuple[str, Path]:
   """
   Returns (idx, out_dir)
+  
+  Uses abbreviated names to stay under Windows MAX_PATH (260 chars).
   """
   idx = _next_index(out_base)
+  
+  # Abbreviate tranche_type for shorter paths
+  tt_abbrev = "wb" if tranche_type == "word-based" else "sb"
+  
   name = (
     f"{idx:03d}"
-    f"__curr={curriculum}"
-    f"__method={scoring_method}"
-    f"__order={sort_order}"
-    f"__tranche={tranche_type}"
-    f"__size={tranche_size}"
-    f"__aoaAgn={int(aoa_agnostic)}"
-    f"__mw={int(multiword)}"
-    f"__skipStop={int(skip_stopwords)}"
-    f"__inflect={int(inflect)}"
+    f"_c={curriculum}"
+    f"_m={scoring_method}"
+    f"_o={sort_order}"
+    f"_t={tt_abbrev}"
+    f"_s={tranche_size}"
+    f"_ag={int(aoa_agnostic)}"
+    f"_mw={int(multiword)}"
+    f"_ss={int(skip_stopwords)}"
+    f"_in={int(inflect)}"
   )
   return str(idx), Path(out_base) / name
 
