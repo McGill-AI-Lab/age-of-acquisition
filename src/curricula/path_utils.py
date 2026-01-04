@@ -4,7 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Union
 
-DEFAULT_TRAINING_ROOT = Path("data/processed/corpora/training")
+PKG_DIR = Path(__file__).resolve().parent
+DEFAULT_TRAINING_ROOT = PKG_DIR.parent.parent / "data" / "processed" / "corpora" / "training"
 
 
 def resolve_curriculum_path(

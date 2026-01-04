@@ -45,3 +45,4 @@
     - All words are lowercase
     - Each line is a sentence
     - There is punctuation
+    - Each part of BabyLM is preprocessed differently and output is in `data/processed/corpora/BabyLM`; specs can be found in `preprocess_babylm.py`
