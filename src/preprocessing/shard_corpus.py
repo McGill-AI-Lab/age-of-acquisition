@@ -8,10 +8,22 @@ import spacy
 from tqdm import tqdm
 import hashlib
 
+from preprocessing.preprocess_babylm import preprocess_babylm
+
 PKG_DIR = Path(__file__).resolve().parent
-RAW_DIR = PKG_DIR.parent.parent / "data" / "corpora"
-BABYLM_DIR = RAW_DIR / "BabyLM"
+RAW_DIR = PKG_DIR.parent.parent / "data" / "raw" / "corpora"
 REFINED_CSV = RAW_DIR / "RefinedBookCorpus.csv"
+PROCESSED_DIR = PKG_DIR.parent.parent / "data" / "processed"
+BABYLM_PROCESSED_DIR = PROCESSED_DIR / "BabyLM"
+
+BABYLM_EXPECTED = [
+  "childes.train",
+  "bnc_spoken.train",
+  "gutenberg.train",
+  "open_subtitles.train",
+  "simple_wiki.train",
+  "switchboard.train",
+]
 
 OUT_DIR = PKG_DIR.parent.parent / "data" / "processed" / "corpora" / "raw_shards"
 NUM_SHARDS = 100
@@ -43,15 +55,31 @@ def _iter_train_lines(train_path: Path) -> Iterator[str]:
       if text:
         yield text
 
-# streams lines from all babylm texts (lowercase)
+# makes sure babylm is preprocessed
+def _ensure_processed_babylm() -> None:
+  missing = [fn for fn in BABYLM_EXPECTED if not (BABYLM_PROCESSED_DIR / fn).exists()]
+  if missing:
+    print(f"Missing processed BabyLM files: {missing}. Running preprocess_babylm()...")
+    preprocess_babylm()
+    # re-check to fail loudly if preprocessing didn't produce them
+    still_missing = [fn for fn in BABYLM_EXPECTED if not (BABYLM_PROCESSED_DIR / fn).exists()]
+    if still_missing:
+      raise FileNotFoundError(
+        f"preprocess_babylm() ran, but these files are still missing in {BABYLM_PROCESSED_DIR}: {still_missing}"
+      )
+
+# streams lines from all preprocessed babylm texts (lowercase)
 def _iter_babylm_texts() -> Iterator[str]:
-  train_files: List[Path] = sorted(BABYLM_DIR.glob("*.train"))
+  _ensure_processed_babylm()
+
+  train_files: List[Path] = sorted(BABYLM_PROCESSED_DIR.glob("*.train"))
   if not train_files:
-    raise FileNotFoundError(f"No files found in {BABYLM_DIR}")
-  
+    raise FileNotFoundError(f"No files found in {BABYLM_PROCESSED_DIR}")
+
   for fp in train_files:
     for line in _iter_train_lines(fp):
-      yield line.lower()  
+      yield line  # already lowercased by preprocess_babylm
+
 
 # streams sentences from refined book corpus
 # uses spacy to split paragraphs into sentences
@@ -85,7 +113,7 @@ def _iter_refined_book_corpus_texts(percent_refined: int) -> Iterator[str]:
     # run spacy only on kept paragraphs
     for doc in _NLP.pipe(kept, batch_size=2048):
       for sent in doc.sents:
-        s = sent.text.strip()
+        s = sent.text.strip().lower()
         if s:
           yield s
 

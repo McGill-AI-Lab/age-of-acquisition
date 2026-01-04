@@ -1,6 +1,6 @@
 """
   This file has examples of how to score sentences.
-  This is use to buil curricula.
+  This is used to build curricula.
 """
 
 from sentence_scoring import * # for score_sentence()
