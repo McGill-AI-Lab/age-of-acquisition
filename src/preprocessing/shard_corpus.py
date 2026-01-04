@@ -9,7 +9,7 @@ from tqdm import tqdm
 import hashlib
 
 PKG_DIR = Path(__file__).resolve().parent
-RAW_DIR = PKG_DIR.parent.parent / "data" / "raw" / "corpora"
+RAW_DIR = PKG_DIR.parent.parent / "data" / "corpora"
 BABYLM_DIR = RAW_DIR / "BabyLM"
 REFINED_CSV = RAW_DIR / "RefinedBookCorpus.csv"
 
