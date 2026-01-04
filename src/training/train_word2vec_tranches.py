@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 """
-Train Word2Vec on tranche-based curriculum and save embeddings per tranche.
+Train Word2Vec incrementally on tranche-based curriculum and save embeddings per tranche.
 
 This script:
 1. Reads tranches from a curriculum directory (e.g., data/processed/corpora/training/000__.../tranches)
    Each tranche is a subdirectory (tranche_0001/, tranche_0002/, ...) containing data.parquet
-2. Trains a single Word2Vec model on the entire corpus
-3. Saves word embeddings organized by tranche - one parquet file per tranche
-   containing all word embeddings that appear in that tranche
+2. Builds vocabulary from all tranches (required for Word2Vec initialization)
+3. Trains incrementally: Train on tranche 1 → save embeddings → train on tranche 2 → save embeddings → ...
+4. Saves word embeddings at each stage - one parquet file per tranche containing embeddings
+   for words that appear in that tranche, captured at that training stage
 
 Expected input format:
     Curriculum directory structure:
@@ -275,11 +276,9 @@ def main():
         for i, path in enumerate(tranche_paths):
             logging.info(f"  Tranche {i}: {path.parent.name}/{path.name}")
     
-    # Create corpus iterator
-    corpus = TrancheCorpusIterator(tranche_paths)
-    
-    # Train Word2Vec
-    logging.info("Training Word2Vec model...")
+    # Step 1: Build vocabulary from all tranches (required for Word2Vec initialization)
+    logging.info("Building vocabulary from all tranches...")
+    logging.info("Initializing Word2Vec model...")
     logging.info(f"  vector_size={args.vector_size}")
     logging.info(f"  window={args.window}")
     logging.info(f"  min_count={args.min_count}")
@@ -288,33 +287,46 @@ def main():
     logging.info(f"  negative={args.negative}")
     logging.info(f"  alpha={args.alpha} (fixed)")
     
+    # Initialize model without sentences - we'll build vocab and train separately
     model = Word2Vec(
-        sentences=corpus,
         vector_size=args.vector_size,
         window=args.window,
         min_count=args.min_count,
         workers=args.workers,
         sg=args.sg,
-        epochs=args.epochs,
         negative=args.negative,
         alpha=args.alpha,
         min_alpha=args.alpha,  # Keep learning rate constant (no decay)
     )
     
+    # Build vocabulary from all tranches (required before training)
+    logging.info("Building vocabulary from all tranches...")
+    all_corpus = TrancheCorpusIterator(tranche_paths)
+    model.build_vocab(all_corpus)
     vocab_size = len(model.wv)
-    logging.info(f"Training complete. Vocabulary size: {vocab_size:,}")
+    logging.info(f"Vocabulary built. Vocabulary size: {vocab_size:,}")
     
-    # Save model
-    model_path = output_dir / "word2vec.model"
-    model.save(str(model_path))
-    logging.info(f"Saved model to {model_path}")
+    # Step 2: Incremental training - train on each tranche and save embeddings
+    logging.info("Starting incremental training...")
     
-    # Extract and save embeddings per tranche
-    logging.info("Extracting embeddings per tranche...")
-    
-    for i, tranche_path in enumerate(tqdm(tranche_paths, desc="Processing tranches")):
+    for i, tranche_path in enumerate(tqdm(tranche_paths, desc="Training tranches")):
         # Use parent directory name (e.g., tranche_0001) as the tranche name
         tranche_name = tranche_path.parent.name if tranche_path.name == "data.parquet" else tranche_path.stem
+        
+        # Get sentences for this tranche
+        tranche_sentences = list(read_tranche_sentences(tranche_path))
+        
+        if not tranche_sentences:
+            logging.warning(f"Tranche {i} ({tranche_name}): No sentences found")
+            continue
+        
+        # Train on this tranche (1 epoch)
+        model.train(
+            corpus_iterable=tranche_sentences,
+            total_examples=len(tranche_sentences),
+            epochs=args.epochs,
+            compute_loss=False
+        )
         
         # Collect vocabulary for this tranche
         tranche_vocab = collect_tranche_vocabulary(tranche_path)
@@ -326,12 +338,20 @@ def main():
             logging.warning(f"Tranche {i} ({tranche_name}): No words in model vocabulary")
             continue
         
-        # Extract embeddings
+        # Extract embeddings at this training stage
         embeddings = np.array([model.wv[w] for w in words_in_model])
         
         # Save to parquet - use tranche name directly (e.g., tranche_0001.parquet)
         output_path = output_dir / f"{tranche_name}.parquet"
         save_embeddings_parquet(words_in_model, embeddings, output_path)
+        
+        if (i + 1) % 100 == 0:
+            logging.info(f"Completed {i + 1}/{len(tranche_paths)} tranches")
+    
+    # Save final model
+    model_path = output_dir / "word2vec.model"
+    model.save(str(model_path))
+    logging.info(f"Saved final model to {model_path}")
     
     logging.info(f"Done! Saved {len(tranche_paths)} tranche embeddings to {output_dir}")
 
