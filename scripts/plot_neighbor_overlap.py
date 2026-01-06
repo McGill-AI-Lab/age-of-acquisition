@@ -3,10 +3,10 @@
 Unified nearest neighbor overlap analysis for curriculum comparison.
 
 This script compares embedding stability between curriculum types (e.g., AoA vs Shuffled)
-by computing k-nearest neighbor overlap across multiple training runs.
+by computing k-nearest neighbor overlap across multiple training runs (2-5 runs supported).
 
 Supports multiple analysis modes via the --mode parameter or custom configuration:
-  - full:  All tranches, 100% words, 2 or 3 runs (default)
+  - full:  All tranches, 100% words, 2 runs (default)
   - fast:  Every 10 tranches, 50% words, 3 runs
   - early: Tranches 30-200, 100% words, 3 runs
   - late:  Tranches 950+, 50% words, 3 runs
@@ -21,12 +21,16 @@ Example usage:
   # Early tranches only
   python plot_neighbor_overlap.py --mode early
 
+  # Analysis with 5 runs
+  python plot_neighbor_overlap.py --num_runs 5
+
   # Custom configuration
   python plot_neighbor_overlap.py --start_tranche 100 --end_tranche 500 --word_sample_frac 0.75 --sample_every 5
 """
 from __future__ import annotations
 
 import argparse
+from itertools import combinations
 from pathlib import Path
 from typing import Optional
 
@@ -59,25 +63,33 @@ def discover_tranches(run_dir: Path) -> list[Path]:
     return sorted(run_dir.glob("tranche_*.parquet"))
 
 
-def compute_knn_overlap_two_runs(
-    words1: list[str],
-    embeddings1: np.ndarray,
-    words2: list[str],
-    embeddings2: np.ndarray,
+def compute_knn_overlap_n_runs(
+    embeddings_list: list[tuple[list[str], np.ndarray]],
     k: int = 30,
     word_sample_frac: float = 1.0,
     seed: int = 42
 ) -> float:
     """
-    Compute k-nearest neighbor overlap between two embedding sets.
+    Compute k-nearest neighbor overlap across N embedding sets (2-5 runs).
     
-    Only considers words that appear in both sets.
+    Returns the average pairwise overlap across all C(n,2) pairs.
+    Only considers words that appear in all sets.
     Optionally samples a fraction of common words.
+    
+    Args:
+        embeddings_list: List of (words, embeddings) tuples, one per run
+        k: Number of nearest neighbors to consider
+        word_sample_frac: Fraction of common words to sample (1.0 = all)
+        seed: Random seed for word sampling
+    
+    Returns:
+        Average pairwise overlap across all pairs of runs
     """
-    # Find common words
-    word_set1 = set(words1)
-    word_set2 = set(words2)
-    common_words = list(word_set1 & word_set2)
+    num_runs = len(embeddings_list)
+    
+    # Find common words across all runs
+    word_sets = [set(words) for words, _ in embeddings_list]
+    common_words = list(set.intersection(*word_sets))
     
     if len(common_words) < k + 1:
         return np.nan
@@ -93,123 +105,45 @@ def compute_knn_overlap_two_runs(
     if len(common_words) < k + 1:
         return np.nan
     
-    # Build word -> index mappings
-    idx1 = {w: i for i, w in enumerate(words1)}
-    idx2 = {w: i for i, w in enumerate(words2)}
+    # Build word -> index mappings for each run
+    idx_maps = [{w: i for i, w in enumerate(words)} for words, _ in embeddings_list]
     
-    # Get embeddings for common words
-    common_indices1 = [idx1[w] for w in common_words]
-    common_indices2 = [idx2[w] for w in common_words]
+    # Get embeddings for common words from each run
+    common_embeddings = []
+    for (words, embeddings), idx_map in zip(embeddings_list, idx_maps):
+        common_indices = [idx_map[w] for w in common_words]
+        common_embeddings.append(embeddings[common_indices])
     
-    emb1 = embeddings1[common_indices1]
-    emb2 = embeddings2[common_indices2]
-    
-    # Compute KNN for each set
+    # Compute KNN for each run
     n_neighbors = min(k + 1, len(common_words))
+    all_indices = []
     
-    nbrs1 = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
-    nbrs1.fit(emb1)
-    _, indices1 = nbrs1.kneighbors(emb1)
+    for emb in common_embeddings:
+        nbrs = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
+        nbrs.fit(emb)
+        _, indices = nbrs.kneighbors(emb)
+        all_indices.append(indices)
     
-    nbrs2 = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
-    nbrs2.fit(emb2)
-    _, indices2 = nbrs2.kneighbors(emb2)
+    # Compute pairwise overlaps for each word, then average across all pairs
+    # Number of pairs = C(num_runs, 2) = num_runs * (num_runs - 1) / 2
+    num_pairs = num_runs * (num_runs - 1) // 2
     
-    # Compute overlap for each word
-    overlaps = []
-    for i, word in enumerate(common_words):
-        # Get neighbor words (excluding self at index 0)
-        neighbors1 = {common_words[j] for j in indices1[i][1:k+1]}
-        neighbors2 = {common_words[j] for j in indices2[i][1:k+1]}
-        
-        overlap = len(neighbors1 & neighbors2) / k
-        overlaps.append(overlap)
-    
-    return np.mean(overlaps)
-
-
-def compute_knn_overlap_three_runs(
-    words1: list[str],
-    embeddings1: np.ndarray,
-    words2: list[str],
-    embeddings2: np.ndarray,
-    words3: list[str],
-    embeddings3: np.ndarray,
-    k: int = 30,
-    word_sample_frac: float = 1.0,
-    seed: int = 42
-) -> float:
-    """
-    Compute k-nearest neighbor overlap across three embedding sets.
-    
-    Returns the average pairwise overlap across all 3 pairs.
-    Only considers words that appear in all three sets.
-    Optionally samples a fraction of common words.
-    """
-    # Find common words across all three runs
-    word_set1 = set(words1)
-    word_set2 = set(words2)
-    word_set3 = set(words3)
-    common_words = list(word_set1 & word_set2 & word_set3)
-    
-    if len(common_words) < k + 1:
-        return np.nan
-    
-    # Sample words if requested
-    if word_sample_frac < 1.0:
-        rng = np.random.default_rng(seed)
-        n_sample = max(k + 1, int(len(common_words) * word_sample_frac))
-        n_sample = min(n_sample, len(common_words))
-        sample_indices = rng.choice(len(common_words), size=n_sample, replace=False)
-        common_words = [common_words[i] for i in sample_indices]
-    
-    if len(common_words) < k + 1:
-        return np.nan
-    
-    # Build word -> index mappings
-    idx1 = {w: i for i, w in enumerate(words1)}
-    idx2 = {w: i for i, w in enumerate(words2)}
-    idx3 = {w: i for i, w in enumerate(words3)}
-    
-    # Get embeddings for common words
-    common_indices1 = [idx1[w] for w in common_words]
-    common_indices2 = [idx2[w] for w in common_words]
-    common_indices3 = [idx3[w] for w in common_words]
-    
-    emb1 = embeddings1[common_indices1]
-    emb2 = embeddings2[common_indices2]
-    emb3 = embeddings3[common_indices3]
-    
-    # Compute KNN for each set
-    n_neighbors = min(k + 1, len(common_words))
-    
-    nbrs1 = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
-    nbrs1.fit(emb1)
-    _, indices1 = nbrs1.kneighbors(emb1)
-    
-    nbrs2 = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
-    nbrs2.fit(emb2)
-    _, indices2 = nbrs2.kneighbors(emb2)
-    
-    nbrs3 = NearestNeighbors(n_neighbors=n_neighbors, algorithm="auto", metric="cosine")
-    nbrs3.fit(emb3)
-    _, indices3 = nbrs3.kneighbors(emb3)
-    
-    # Compute pairwise overlaps for each word, then average
     all_overlaps = []
-    for i, word in enumerate(common_words):
-        # Get neighbor words (excluding self at index 0)
-        neighbors1 = {common_words[j] for j in indices1[i][1:k+1]}
-        neighbors2 = {common_words[j] for j in indices2[i][1:k+1]}
-        neighbors3 = {common_words[j] for j in indices3[i][1:k+1]}
+    for word_idx in range(len(common_words)):
+        # Get neighbor words for this word from each run
+        neighbor_sets = []
+        for run_indices in all_indices:
+            neighbors = {common_words[j] for j in run_indices[word_idx][1:k+1]}
+            neighbor_sets.append(neighbors)
         
         # Compute pairwise overlaps
-        overlap_12 = len(neighbors1 & neighbors2) / k
-        overlap_13 = len(neighbors1 & neighbors3) / k
-        overlap_23 = len(neighbors2 & neighbors3) / k
+        pairwise_overlaps = []
+        for i, j in combinations(range(num_runs), 2):
+            overlap = len(neighbor_sets[i] & neighbor_sets[j]) / k
+            pairwise_overlaps.append(overlap)
         
-        # Average across all 3 pairs
-        avg_overlap = (overlap_12 + overlap_13 + overlap_23) / 3
+        # Average across all pairs for this word
+        avg_overlap = sum(pairwise_overlaps) / num_pairs
         all_overlaps.append(avg_overlap)
     
     return np.mean(all_overlaps)
@@ -228,7 +162,7 @@ def compute_curriculum_overlap(
     Compute per-tranche overlap across multiple runs.
     
     Args:
-        run_dirs: List of 2 or 3 run directories
+        run_dirs: List of 2-5 run directories
         k: Number of nearest neighbors
         start_tranche: First tranche to include (inclusive)
         end_tranche: Last tranche to include (inclusive)
@@ -241,7 +175,7 @@ def compute_curriculum_overlap(
         overlaps: List of overlap values
     """
     num_runs = len(run_dirs)
-    assert num_runs in [2, 3], "Must provide 2 or 3 run directories"
+    assert 2 <= num_runs <= 5, "Must provide 2-5 run directories"
     
     # Discover tranches for each run
     all_tranches = [discover_tranches(run_dir) for run_dir in run_dirs]
@@ -285,19 +219,12 @@ def compute_curriculum_overlap(
             # Use tranche number as additional seed component for reproducibility
             tranche_seed = seed + tranche_num
             
-            if num_runs == 2:
-                overlap = compute_knn_overlap_two_runs(
-                    embeddings_data[0][0], embeddings_data[0][1],
-                    embeddings_data[1][0], embeddings_data[1][1],
-                    k=k, word_sample_frac=word_sample_frac, seed=tranche_seed
-                )
-            else:  # num_runs == 3
-                overlap = compute_knn_overlap_three_runs(
-                    embeddings_data[0][0], embeddings_data[0][1],
-                    embeddings_data[1][0], embeddings_data[1][1],
-                    embeddings_data[2][0], embeddings_data[2][1],
-                    k=k, word_sample_frac=word_sample_frac, seed=tranche_seed
-                )
+            overlap = compute_knn_overlap_n_runs(
+                embeddings_data,
+                k=k,
+                word_sample_frac=word_sample_frac,
+                seed=tranche_seed
+            )
             
             if not np.isnan(overlap):
                 tranche_numbers.append(tranche_num)
@@ -361,6 +288,7 @@ Modes:
 Examples:
   python plot_neighbor_overlap.py --mode fast
   python plot_neighbor_overlap.py --mode early --num_runs 2
+  python plot_neighbor_overlap.py --num_runs 5
   python plot_neighbor_overlap.py --start_tranche 100 --end_tranche 500
         """
     )
@@ -374,7 +302,7 @@ Examples:
         help="Analysis mode preset (default: full). Custom args override mode defaults.",
     )
     
-    # Run paths
+    # Run paths - AoA curriculum (up to 5 runs)
     parser.add_argument(
         "--aoa_run1",
         type=str,
@@ -391,8 +319,22 @@ Examples:
         "--aoa_run3",
         type=str,
         default="outputs/embeddings/aoa_50d_2",
-        help="Path to AoA curriculum run 3 (only used if --num_runs 3).",
+        help="Path to AoA curriculum run 3 (only used if --num_runs >= 3).",
     )
+    parser.add_argument(
+        "--aoa_run4",
+        type=str,
+        default="outputs/embeddings/aoa_50d_3",
+        help="Path to AoA curriculum run 4 (only used if --num_runs >= 4).",
+    )
+    parser.add_argument(
+        "--aoa_run5",
+        type=str,
+        default="outputs/embeddings/aoa_50d_4",
+        help="Path to AoA curriculum run 5 (only used if --num_runs >= 5).",
+    )
+    
+    # Run paths - Shuffled curriculum (up to 5 runs)
     parser.add_argument(
         "--shuffled_run1",
         type=str,
@@ -409,7 +351,19 @@ Examples:
         "--shuffled_run3",
         type=str,
         default="outputs/embeddings/shuffled_50d_2",
-        help="Path to Shuffled curriculum run 3 (only used if --num_runs 3).",
+        help="Path to Shuffled curriculum run 3 (only used if --num_runs >= 3).",
+    )
+    parser.add_argument(
+        "--shuffled_run4",
+        type=str,
+        default="outputs/embeddings/shuffled_50d_3",
+        help="Path to Shuffled curriculum run 4 (only used if --num_runs >= 4).",
+    )
+    parser.add_argument(
+        "--shuffled_run5",
+        type=str,
+        default="outputs/embeddings/shuffled_50d_4",
+        help="Path to Shuffled curriculum run 5 (only used if --num_runs >= 5).",
     )
     
     # Analysis parameters
@@ -417,7 +371,8 @@ Examples:
         "--num_runs",
         type=int,
         default=None,
-        help="Number of runs to compare (2 or 3). Defaults to mode setting.",
+        choices=[2, 3, 4, 5],
+        help="Number of runs to compare (2-5). Defaults to mode setting.",
     )
     parser.add_argument(
         "--k",
@@ -481,12 +436,20 @@ Examples:
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Collect run directories
-    aoa_runs = [Path(args.aoa_run1), Path(args.aoa_run2)]
-    shuffled_runs = [Path(args.shuffled_run1), Path(args.shuffled_run2)]
-    if num_runs == 3:
-        aoa_runs.append(Path(args.aoa_run3))
-        shuffled_runs.append(Path(args.shuffled_run3))
+    # Collect run directories based on num_runs
+    aoa_run_paths = [
+        args.aoa_run1, args.aoa_run2, args.aoa_run3, args.aoa_run4, args.aoa_run5
+    ]
+    shuffled_run_paths = [
+        args.shuffled_run1, args.shuffled_run2, args.shuffled_run3, 
+        args.shuffled_run4, args.shuffled_run5
+    ]
+    
+    aoa_runs = [Path(p) for p in aoa_run_paths[:num_runs]]
+    shuffled_runs = [Path(p) for p in shuffled_run_paths[:num_runs]]
+    
+    # Calculate number of pairs for display
+    num_pairs = num_runs * (num_runs - 1) // 2
     
     # Print configuration
     sample_pct = int(word_sample_frac * 100)
@@ -496,7 +459,7 @@ Examples:
     print(f"Neighbor Overlap Analysis")
     print(f"{'='*60}")
     print(f"  Mode: {args.mode}")
-    print(f"  Runs: {num_runs}")
+    print(f"  Runs: {num_runs} ({num_pairs} pairwise comparisons)")
     print(f"  Tranche range: {range_str}")
     print(f"  Tranche sampling: every {sample_every}")
     print(f"  Word sampling: {sample_pct}%")
