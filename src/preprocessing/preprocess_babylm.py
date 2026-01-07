@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterable, List
+import re
 
 import spacy
 from tqdm import tqdm
 
 PKG_DIR = Path(__file__).resolve().parent
+
+BRACKET_TAG_RE = re.compile(r"\[[^\]]*\]")  # matches [laughs], [noise], etc.
+
+# helper to remove bracketed tags in childes
+def remove_bracket_tags(text: str) -> str:
+    text = BRACKET_TAG_RE.sub("", text)
+    return " ".join(text.split())
+
 
 def preprocess_babylm() -> None:
     """
@@ -63,7 +72,6 @@ def preprocess_babylm() -> None:
         doc = nlp(text)
         return [sent.text.strip() for sent in doc.sents if sent.text.strip()]
 
-
     def process_childes(in_path: Path, out_path: Path) -> None:
         def gen() -> Iterable[str]:
             with in_path.open("r", encoding="utf-8", errors="replace") as f:
@@ -80,6 +88,7 @@ def preprocess_babylm() -> None:
                         .replace("www", "")
                         .strip()
                     )
+                    text = remove_bracket_tags(text)
                     if text:
                         yield text
 

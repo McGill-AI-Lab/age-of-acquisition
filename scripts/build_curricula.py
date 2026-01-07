@@ -14,7 +14,8 @@ idx = build_curriculum(
   aoa_agnostic=True, # don't care
   multiword=False, # don't care
   skip_stopwords=True,
-  inflect=True
+  inflect=True,
+  duplication_cap=5,
 )
 
 # curriculum index
