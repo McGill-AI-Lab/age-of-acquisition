@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Literal, Optional, Dict, Any
@@ -35,9 +36,13 @@ def build_curriculum(
   multiword: bool = False,
   skip_stopwords: bool = False,
   inflect: bool = False,
+  duplication_cap: int = -1,
 ) -> str: # output curriculum index (numeric prefix of the output folder)
   if tranche_size <= 0:
     raise ValueError("tranche_size must be > 0")
+
+  if duplication_cap != -1 and duplication_cap <= 0:
+    raise ValueError("duplication_cap must be -1 (disabled) or a positive int")
 
   if curriculum != "shuffled" and sort_order not in ("asc", "desc"):
     raise ValueError("sort_order must be 'asc' or 'desc'")
@@ -81,6 +86,7 @@ def build_curriculum(
     "multiword": multiword,
     "skip_stopwords": skip_stopwords,
     "inflect": inflect,
+    "duplication_cap": duplication_cap,
     "curriculum_index": curr_idx,
   }
 
@@ -98,6 +104,11 @@ def build_curriculum(
   
   def scored_row_generator():
     nonlocal total_in, total_kept, total_dropped
+
+    # Optional: cap duplicates globally using a normalized sentence key
+    # Normalization: lowercase + collapse whitespace
+    ws_re = re.compile(r"\s+")
+    dup_counts: Dict[str, int] = {}  # normalized_sentence -> count
 
     rng = None
     if curriculum == "shuffled":
@@ -124,6 +135,14 @@ def build_curriculum(
       if not s:
         total_dropped += 1
         continue
+
+      if duplication_cap != -1:
+        norm = ws_re.sub(" ", s.lower()).strip()
+        prev = dup_counts.get(norm, 0)
+        if prev >= duplication_cap:
+          total_dropped += 1
+          continue
+        dup_counts[norm] = prev + 1
       
       # shuffled generates a random sort_key; value is a placeholder
       if curriculum == "shuffled":

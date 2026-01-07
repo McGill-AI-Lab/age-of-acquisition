@@ -29,7 +29,8 @@
       aoa_agnostic: bool = True, # when false, use max-aoa word to score
       multiword: bool = False,
       skip_stopwords: bool = False,
-      inflect: bool = True
+      inflect: bool = True,
+      duplication_cap: int = -1
     )
 
     # before training, shuffle within tranches in-place
@@ -51,4 +52,5 @@
 
 4. Extra Details
     - `aoa_agnostic` only applies when `curriculum` is one of `conc|freq|phon`. When True, score sentence directly using selected metric. When False, score based on max-AoA word in the sentence.
+    - `duplication_cap` caps the number of duplicated, normalized sentences. Its default value is -1, in which case no duplicates are removed.
     - Do not rename curriculum folder names! They are used by plotting, sampling, and shuffling.
