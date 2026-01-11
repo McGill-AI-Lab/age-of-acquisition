@@ -9,9 +9,10 @@ from tqdm import tqdm
 
 from curricula.io import iter_input_rows_with_source, list_parquet_shards, write_parquet_rows
 from curricula.external_sort import external_sort_parquet
-from curricula.tranche import write_sentence_based_tranches, write_word_based_tranches
+from curricula.tranche import write_sentence_based_tranches, write_word_based_tranches, write_matching_tranches
 from curricula.naming import make_curriculum_dir, make_run_dir
 from curricula.config import write_config_json
+from curricula.path_utils import resolve_curriculum_path
 
 from sentence_scoring import score_sentence
 
@@ -19,7 +20,7 @@ from sentence_scoring import score_sentence
 Curriculum = Literal["shuffled", "aoa", "conc", "freq", "phon"]
 Method = Literal["mean", "min", "max", "add"]
 Order = Literal["asc", "desc"]
-TrancheType = Literal["word-based", "sentence-based"]
+TrancheType = Literal["word-based", "sentence-based", "matching"]
 
 PKG_DIR = Path(__file__).resolve().parent
 BASE_DIR = PKG_DIR.parent.parent / "data" / "processed" / "corpora"
@@ -32,14 +33,18 @@ def build_curriculum(
   sort_order: Order = "asc",
   tranche_type: TrancheType = "word-based",
   tranche_size: int = 500,
+  matching_idx: Optional[str] = None,
   aoa_agnostic: bool = True,
   multiword: bool = False,
   skip_stopwords: bool = False,
   inflect: bool = False,
   duplication_cap: int = -1,
 ) -> str: # output curriculum index (numeric prefix of the output folder)
-  if tranche_size <= 0:
+  if tranche_size <= 0 and tranche_type != "matching":
     raise ValueError("tranche_size must be > 0")
+
+  if tranche_type == "matching" and not matching_idx:
+    raise ValueError("matching_idx must be provided when tranche_type='matching'")
 
   if duplication_cap != -1 and duplication_cap <= 0:
     raise ValueError("duplication_cap must be -1 (disabled) or a positive int")
@@ -88,6 +93,7 @@ def build_curriculum(
     "inflect": inflect,
     "duplication_cap": duplication_cap,
     "curriculum_index": curr_idx,
+    "matching_idx": matching_idx,
   }
 
   # seed for shuffled curriculum
@@ -208,6 +214,14 @@ def build_curriculum(
       out_dir=tranche_root,
       tranche_size=tranche_size,
     )
+  elif tranche_type == "matching":
+    if not matching_idx:
+      raise ValueError("matching_idx must be provided when tranche_type='matching'")
+    num_tranches = write_matching_tranches(
+      ordered_parquet=ordered_path,
+      out_dir=tranche_root,
+      matching_idx=matching_idx,
+    )
   else:
     raise ValueError(f"Unknown tranche_type: {tranche_type}")
 
@@ -215,6 +229,15 @@ def build_curriculum(
 
   # write config
   write_config_json(out_dir / "config.json", meta)
+  
+  # copy reference config file if building a matching curriculum
+  if tranche_type == "matching":
+    ref_root = resolve_curriculum_path(matching_idx)
+    ref_cfg = ref_root / "config.json"
+    if not ref_cfg.exists():
+      raise FileNotFoundError(f"Expected reference config at {ref_cfg} (for matching_idx={matching_idx})")
+    
+    shutil.copy2(ref_cfg, out_dir / "matching_config.json")
 
   # UNCOMMENT TO DELETE TEMP DIR
   shutil.rmtree(run_dir, ignore_errors=True)
