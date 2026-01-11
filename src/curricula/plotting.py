@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Literal
 
 import pyarrow.parquet as pq
 import matplotlib.pyplot as plt
@@ -78,7 +78,7 @@ def _parquet_num_words(
 def plot_tranche_sizes(
     curriculum_path: str | Path,
     save_path: Optional[str | Path] = None,
-    show: bool = True,
+    show: bool = False,
     metric: Literal["sentence", "word"] = "sentence",
     text_column: str = "sentence",
     batch_size: int = 4096,
@@ -106,6 +106,13 @@ def plot_tranche_sizes(
 
     curriculum_path = Path(curriculum_path)
     tranche_dirs = _find_tranche_dirs(curriculum_path)
+
+    # Auto-save by default into the curriculum root (not tranches/)
+    if save_path is None:
+        resolved_root = resolve_curriculum_path(curriculum_path)
+        # if user passed .../tranches, go one level up
+        curriculum_root = resolved_root.parent if resolved_root.name == "tranches" else resolved_root
+        save_path = curriculum_root / f"tranche_sizes_{metric}.png"
 
     xs: List[int] = []
     ys: List[int] = []
