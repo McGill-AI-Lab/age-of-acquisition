@@ -39,14 +39,15 @@
 
 4. Analytics
     - There are two useful functions for validating the curriculum.
-    - `plot_tranche_sizes` displays a graph with tranche number against number of sentences
+    - `plot_tranche_sizes` displays a graph with tranche number against number of sentences or words
     - `write_samples` writes `samples.txt` into the curriculum folder. Each line is the first sentence from each tranche and its score.
     ```python
     from curricula import plot_tranche_sizes
     from curricula import write_samples
 
     # input string is curriculum index
-    plot_tranche_sizes("1") # output on screen
+    plot_tranche_sizes("1", metric="sentence") # output on screen
+    plot_tranche_sizes("1", metric="word")
     plot_write_samples("1") # output in data/processed/corpora/training/NAME
     ```
 
