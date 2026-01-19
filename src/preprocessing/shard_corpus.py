@@ -36,8 +36,21 @@ CSV_CHUNKSIZE = 200_000
 REFINED_SAMPLE_SEED = 1283
 PERCENT_REFINED_KEEP = 10 # percent of refined book corpus to keep 
 
+# maximum number of words a sentence can have; or else discarded
+# currently not being used
+MAX_SENT_WORDS = 200 
+
 _NLP = spacy.blank("en")
 _NLP.add_pipe("sentencizer")
+
+# decides if a sentence is too long based on MAX_SENT_WORDS
+# currently not being used
+def _is_not_too_long(s: str, max_words: int = MAX_SENT_WORDS) -> bool:
+  # robust “word” count: split on any whitespace
+  not_too_long = len(s.split()) <= max_words
+  if not not_too_long:
+    print("long sentence removed")
+  return not_too_long
 
 # helper to decide whether to keep a refined paragraph
 def _u64_hash(row_idx: int) -> int:

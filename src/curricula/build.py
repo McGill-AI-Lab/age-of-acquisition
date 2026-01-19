@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from curricula.io import iter_input_rows_with_source, list_parquet_shards, write_parquet_rows
 from curricula.external_sort import external_sort_parquet
-from curricula.tranche import write_sentence_based_tranches, write_word_based_tranches, write_matching_tranches
+from curricula.tranche import write_sentence_based_tranches, write_word_based_tranches, write_matching_tranches, write_word_count_tranches
 from curricula.naming import make_curriculum_dir, make_run_dir
 from curricula.config import write_config_json
 from curricula.path_utils import resolve_curriculum_path
@@ -20,7 +20,7 @@ from sentence_scoring import score_sentence
 Curriculum = Literal["shuffled", "aoa", "conc", "freq", "phon"]
 Method = Literal["mean", "min", "max", "add"]
 Order = Literal["asc", "desc"]
-TrancheType = Literal["word-based", "sentence-based", "matching"]
+TrancheType = Literal["word-based", "sentence-based", "matching", "word-count"]
 
 PKG_DIR = Path(__file__).resolve().parent
 BASE_DIR = PKG_DIR.parent.parent / "data" / "processed" / "corpora"
@@ -33,6 +33,7 @@ def build_curriculum(
   sort_order: Order = "asc",
   tranche_type: TrancheType = "word-based",
   tranche_size: int = 500,
+  max_tranches: int = -1,
   matching_idx: Optional[str] = None,
   aoa_agnostic: bool = True,
   multiword: bool = False,
@@ -49,11 +50,14 @@ def build_curriculum(
   if duplication_cap != -1 and duplication_cap <= 0:
     raise ValueError("duplication_cap must be -1 (disabled) or a positive int")
 
+  if max_tranches != -1 and max_tranches <= 0:
+    raise ValueError("max_tranches must be -1 (disabled) or a positive int")
+
   if curriculum != "shuffled" and sort_order not in ("asc", "desc"):
     raise ValueError("sort_order must be 'asc' or 'desc'")
 
   if not IN_DIR.exists():
-    FileNotFoundError(f"Input shard directory not found: {IN_DIR}")
+    raise FileNotFoundError(f"Input shard directory not found: {IN_DIR}")
   
   OUT_BASE.mkdir(parents=True, exist_ok=True)
 
@@ -87,6 +91,7 @@ def build_curriculum(
     "sort_order": sort_order,
     "tranche_type": tranche_type,
     "tranche_size": tranche_size,
+    "max_tranches": max_tranches,
     "aoa_agnostic": aoa_agnostic,
     "multiword": multiword,
     "skip_stopwords": skip_stopwords,
@@ -207,12 +212,14 @@ def build_curriculum(
       ordered_parquet=ordered_path,
       out_dir=tranche_root,
       tranche_size=tranche_size,
+      max_tranches=max_tranches,
     )
   elif tranche_type == "word-based":
     num_tranches = write_word_based_tranches(
       ordered_parquet=ordered_path,
       out_dir=tranche_root,
       tranche_size=tranche_size,
+      max_tranches=max_tranches,
     )
   elif tranche_type == "matching":
     if not matching_idx:
@@ -221,6 +228,14 @@ def build_curriculum(
       ordered_parquet=ordered_path,
       out_dir=tranche_root,
       matching_idx=matching_idx,
+      max_tranches=max_tranches,
+    )
+  elif tranche_type == "word-count":
+    num_tranches = write_word_count_tranches(
+      ordered_parquet=ordered_path,
+      out_dir=tranche_root,
+      tranche_size=tranche_size,
+      max_tranches=max_tranches,
     )
   else:
     raise ValueError(f"Unknown tranche_type: {tranche_type}")
