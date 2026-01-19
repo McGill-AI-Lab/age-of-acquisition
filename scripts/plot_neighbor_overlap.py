@@ -68,11 +68,11 @@ def compute_knn_overlap_n_runs(
     k: int = 30,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> float:
+) -> tuple[float, float]:
     """
     Compute k-nearest neighbor overlap across N embedding sets (2-5 runs).
     
-    Returns the average pairwise overlap across all C(n,2) pairs.
+    Returns the average pairwise overlap across all C(n,2) pairs and its standard error.
     Only considers words that appear in all sets.
     Optionally samples a fraction of common words.
     
@@ -83,7 +83,7 @@ def compute_knn_overlap_n_runs(
         seed: Random seed for word sampling
     
     Returns:
-        Average pairwise overlap across all pairs of runs
+        (mean_overlap, std_error): Average pairwise overlap and its standard error
     """
     num_runs = len(embeddings_list)
     
@@ -146,7 +146,13 @@ def compute_knn_overlap_n_runs(
         avg_overlap = sum(pairwise_overlaps) / num_pairs
         all_overlaps.append(avg_overlap)
     
-    return np.mean(all_overlaps)
+    # Compute mean and standard error
+    mean_overlap = np.mean(all_overlaps)
+    std_overlap = np.std(all_overlaps, ddof=1)  # Sample standard deviation
+    n_words = len(all_overlaps)
+    std_error = std_overlap / np.sqrt(n_words) if n_words > 1 else 0.0
+    
+    return mean_overlap, std_error
 
 
 def compute_curriculum_overlap(
@@ -157,7 +163,7 @@ def compute_curriculum_overlap(
     sample_every: int = 1,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> tuple[list[int], list[float]]:
+) -> tuple[list[int], list[float], list[float]]:
     """
     Compute per-tranche overlap across multiple runs.
     
@@ -172,7 +178,8 @@ def compute_curriculum_overlap(
     
     Returns:
         tranche_numbers: List of tranche indices
-        overlaps: List of overlap values
+        overlaps: List of overlap mean values
+        errors: List of standard errors for each overlap
     """
     num_runs = len(run_dirs)
     assert 2 <= num_runs <= 5, "Must provide 2-5 run directories"
@@ -195,6 +202,7 @@ def compute_curriculum_overlap(
     
     tranche_numbers = []
     overlaps = []
+    errors = []
     
     # Build description string
     sample_pct = int(word_sample_frac * 100)
@@ -219,7 +227,7 @@ def compute_curriculum_overlap(
             # Use tranche number as additional seed component for reproducibility
             tranche_seed = seed + tranche_num
             
-            overlap = compute_knn_overlap_n_runs(
+            overlap, error = compute_knn_overlap_n_runs(
                 embeddings_data,
                 k=k,
                 word_sample_frac=word_sample_frac,
@@ -229,10 +237,11 @@ def compute_curriculum_overlap(
             if not np.isnan(overlap):
                 tranche_numbers.append(tranche_num)
                 overlaps.append(overlap)
+                errors.append(error)
         except Exception as e:
             print(f"Warning: Failed to process {tranche_name}: {e}")
     
-    return tranche_numbers, overlaps
+    return tranche_numbers, overlaps, errors
 
 
 def format_tranche_type_display(tranche_type: str | None) -> str:
@@ -591,7 +600,7 @@ Examples:
     
     # Compute overlaps for first curriculum
     print(f"\n=== {curriculum1_name} Curriculum ({aoa_num_runs} runs) ===")
-    aoa_tranches, aoa_overlaps = compute_curriculum_overlap(
+    aoa_tranches, aoa_overlaps, aoa_errors = compute_curriculum_overlap(
         aoa_runs,
         k=args.k,
         start_tranche=start_tranche,
@@ -603,7 +612,7 @@ Examples:
     
     # Compute overlaps for second curriculum
     print(f"\n=== {curriculum2_name} Curriculum ({shuffled_num_runs} runs) ===")
-    shuffled_tranches, shuffled_overlaps = compute_curriculum_overlap(
+    shuffled_tranches, shuffled_overlaps, shuffled_errors = compute_curriculum_overlap(
         shuffled_runs,
         k=args.k,
         start_tranche=start_tranche,
@@ -621,18 +630,24 @@ Examples:
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
-    # First curriculum line
-    plt.plot(
-        aoa_tranches, aoa_overlaps,
+    # Convert errors to numpy arrays for errorbar
+    aoa_errors_array = np.array(aoa_errors)
+    shuffled_errors_array = np.array(shuffled_errors)
+    
+    # First curriculum line with error bars
+    plt.errorbar(
+        aoa_tranches, aoa_overlaps, yerr=aoa_errors_array,
         linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
-        marker='o' if use_markers else None, markersize=marker_size
+        marker='o' if use_markers else None, markersize=marker_size,
+        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(aoa_tranches) // 50) if len(aoa_tranches) > 50 else 1
     )
     
-    # Second curriculum line
-    plt.plot(
-        shuffled_tranches, shuffled_overlaps,
+    # Second curriculum line with error bars
+    plt.errorbar(
+        shuffled_tranches, shuffled_overlaps, yerr=shuffled_errors_array,
         linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
-        marker='s' if use_markers else None, markersize=marker_size
+        marker='s' if use_markers else None, markersize=marker_size,
+        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(shuffled_tranches) // 50) if len(shuffled_tranches) > 50 else 1
     )
     
     plt.xlabel("Training Tranche", fontsize=12)
