@@ -15,6 +15,11 @@ This script (`plot_neighbor_overlap.py`) measures **embedding stability** by com
 - **Supported types**: `word-based` (unique words), `sentence-based`, `word-count`, `matching`
 - **Display format**: Shows as "Unique Word-Based", "Sentence-Based", etc. in titles
 
+### Error Bars
+- **Standard error bars**: Plots now include error bars showing the standard error of the mean overlap
+- **Variability measurement**: Error bars represent variability in overlap across words within each tranche
+- **Calculation**: Standard error = σ / √n, where σ is the standard deviation of word-level overlaps and n is the number of words
+
 ## How It Works
 
 1. **Load Embeddings**: For each tranche, load word embeddings from multiple training runs
@@ -22,8 +27,19 @@ This script (`plot_neighbor_overlap.py`) measures **embedding stability** by com
 3. **Compute k-NN**: For each word, find its k nearest neighbors in each run's embedding space
 4. **Calculate Overlap**: Measure how many neighbors are shared between runs (pairwise)
 5. **Average**: Report the mean overlap across all word pairs and all run pairs
+6. **Compute Error Bars**: Calculate standard error of the mean overlap across words
 
 Higher overlap = more stable embeddings (words have consistent neighbors across runs).
+
+### Error Bar Calculation
+
+For each tranche, the script computes:
+1. **Word-level overlaps**: For each word, compute the average pairwise overlap across all run pairs
+2. **Mean overlap**: Average across all words: `μ = mean(word_overlaps)`
+3. **Standard deviation**: Sample standard deviation: `σ = std(word_overlaps, ddof=1)`
+4. **Standard error**: `SE = σ / √n`, where n is the number of words
+
+The error bars represent the **standard error of the mean**, indicating the precision of the overlap estimate. Smaller error bars indicate more consistent overlap across words, while larger error bars indicate greater variability.
 
 ## Quick Start
 
@@ -242,12 +258,14 @@ python scripts/plot_neighbor_overlap.py \
 The script generates:
 
 1. **Plot** (default: `outputs/figures/{curriculum1}_vs_{curriculum2}_overlap{suffix}.png`):
-   - Two lines showing overlap over training tranches
+   - Two lines showing overlap over training tranches with error bars
    - Blue: First curriculum (default: AoA)
    - Red: Second curriculum (default: Shuffled)
+   - **Error bars**: Standard error of the mean overlap (shows variability across words)
    - Dashed lines: Mean overlap for each curriculum
    - **Title includes tranche type** when specified (e.g., "Unique Word-Based Tranches")
    - Title format: `"Embedding Stability: {Curriculum1} vs {Curriculum2} Curriculum ({TrancheType})"`
+   - Error bars are automatically spaced when there are many data points to avoid clutter
 
 2. **Console Statistics**:
    - Mean, min, max overlap for each curriculum
@@ -257,6 +275,8 @@ The script generates:
 ## Interpreting Results
 
 - **Higher overlap** = More stable embeddings
+- **Error bars**: Smaller error bars indicate more consistent overlap across words; larger error bars indicate greater variability
+- **Non-overlapping error bars**: When error bars don't overlap between curricula, it suggests a statistically meaningful difference
 - **Curriculum comparison**: Compare any two curricula (e.g., AoA vs Shuffled, Frequency vs Concreteness)
 - **Tranche type matters**: Different tranche types may show different stability patterns
 - **Early vs Late**: Compare stability at different training stages
