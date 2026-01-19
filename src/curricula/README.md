@@ -24,8 +24,9 @@
       curriculum: str = "shuffled" | "aoa" | "conc" | "freq" | "phon",
       scoring_method: str = "mean" | "min" | "max" | "add",
       sort_order: str = "asc" | "desc",
-      tranche_type: str = "word-based" | "sentence-based" | "matching",
-      tranche_size: int = 500,  # either num words (word-based) or num sentences (sentence-based)
+      tranche_type: str = "word-based" | "sentence-based" | "matching" | "word-count",
+      tranche_size: int = 500,  # either num words (word-based, word-count) or num sentences (sentence-based)
+      max_tranches: int = -1,
       aoa_agnostic: bool = True, # when false, use max-aoa word to score
       multiword: bool = False,
       skip_stopwords: bool = False,
@@ -47,9 +48,10 @@
     ```
 
 4. Analytics
-    - There are two useful functions for validating the curriculum.
+    - There are some useful functions for validating the curriculum.
     - `plot_tranche_sizes` displays a graph with tranche number against number of sentences or words
     - `write_samples` writes `samples.txt` into the curriculum folder. Each line is the first sentence from each tranche and its score.
+    - `write_unique_word_counts` writes `unique_word_counts.json` into the curriculum folder, displaying unique word count metrics by tranche.
     ```python
     from curricula import plot_tranche_sizes
     from curricula import write_samples
@@ -59,10 +61,12 @@
     plot_tranche_sizes("1", metric="sentence") 
     plot_tranche_sizes("1", metric="word", show=True) # automatically show graph on screen (still saves)
     plot_write_samples("1") 
+    write_unique_word_counts("1")
     ```
 
 4. Extra Details
     - `aoa_agnostic` only applies when `curriculum` is one of `conc|freq|phon`. When True, score sentence directly using selected metric. When False, score based on max-AoA word in the sentence.
     - `duplication_cap` caps the number of duplicated, normalized sentences. Its default value is -1, in which case no duplicates are removed.
     - `tranche_type="matching"` builds tranches based on the number of words in each tranche in a specified curriculum, given by `matching_idx`.
+    - `tranche_type="word-count"` builds tranches by ensuring that each tranch contains as close to `tranche_size` number of words as possible. These words are *not necessarily unique*, compared to `tranche_type="word-based"` where each tranche introduces `tranche_size` number of *unique* words.
     - Do not rename curriculum folder names! They are used by plotting, sampling, and shuffling.

@@ -37,7 +37,14 @@ def make_curriculum_dir(
   idx = _next_index(out_base)
   
   # Abbreviate tranche_type for shorter paths
-  tt_abbrev = "wb" if tranche_type == "word-based" else "sb"
+  if tranche_type == "word-based":
+    tt_abbrev = "wb"
+  elif tranche_type == "sentence-based":
+    tt_abbrev = "sb"
+  elif tranche_type == "word-count":
+    tt_abbrev = "wc"
+  else:
+    tt_abbrev = "mt"
   
   name = (
     f"{idx:03d}"

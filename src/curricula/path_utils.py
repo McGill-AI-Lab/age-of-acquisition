@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Union
+from typing import Union, List
 
 PKG_DIR = Path(__file__).resolve().parent
 DEFAULT_TRAINING_ROOT = PKG_DIR.parent.parent / "data" / "processed" / "corpora" / "training"
