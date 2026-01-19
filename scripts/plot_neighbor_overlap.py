@@ -235,6 +235,62 @@ def compute_curriculum_overlap(
     return tranche_numbers, overlaps
 
 
+def format_tranche_type_display(tranche_type: str | None) -> str:
+    """
+    Format tranche type for display in plot title.
+    """
+    if tranche_type is None:
+        return ""
+    
+    mapping = {
+        "word-based": "Unique Word-Based",
+        "sentence-based": "Sentence-Based",
+        "word-count": "Word-Count",
+        "matching": "Matching",
+    }
+    return mapping.get(tranche_type, tranche_type.replace("-", " ").title())
+
+
+def extract_curriculum_name_from_path(path: str | Path) -> str:
+    """
+    Extract curriculum name from a run path.
+    Examples:
+        "outputs/embeddings/aoa_50d_0" -> "AoA"
+        "outputs/embeddings/freq_50d_0" -> "Frequency"
+        "outputs/embeddings/shuffled_50d_0" -> "Shuffled"
+        "outputs/embeddings/conc_50d_0" -> "Concreteness"
+    """
+    path_str = str(path)
+    # Extract the directory name (last component)
+    dir_name = Path(path_str).name
+    
+    # Common curriculum name mappings
+    curriculum_map = {
+        "aoa": "AoA",
+        "freq": "Frequency",
+        "frequency": "Frequency",
+        "shuffled": "Shuffled",
+        "random": "Shuffled",
+        "conc": "Concreteness",
+        "concreteness": "Concreteness",
+        "phon": "Phonology",
+        "phonology": "Phonology",
+    }
+    
+    # Try to find curriculum name in path
+    path_lower = path_str.lower()
+    for key, display_name in curriculum_map.items():
+        if key in path_lower:
+            return display_name
+    
+    # Fallback: capitalize first part of directory name before underscore
+    if "_" in dir_name:
+        base_name = dir_name.split("_")[0]
+        return base_name.capitalize()
+    
+    return dir_name.capitalize()
+
+
 def get_mode_defaults(mode: str) -> dict:
     """Get default parameters for each analysis mode."""
     modes = {
@@ -368,11 +424,25 @@ Examples:
     
     # Analysis parameters
     parser.add_argument(
+        "--aoa_num_runs",
+        type=int,
+        default=None,
+        choices=[2, 3, 4, 5],
+        help="Number of AoA/Frequency runs to compare (2-5). Defaults to --num_runs if set, else mode setting.",
+    )
+    parser.add_argument(
+        "--shuffled_num_runs",
+        type=int,
+        default=None,
+        choices=[2, 3, 4, 5],
+        help="Number of Shuffled runs to compare (2-5). Defaults to --num_runs if set, else mode setting.",
+    )
+    parser.add_argument(
         "--num_runs",
         type=int,
         default=None,
         choices=[2, 3, 4, 5],
-        help="Number of runs to compare (2-5). Defaults to mode setting.",
+        help="Number of runs to compare for both curricula (2-5). Overridden by --aoa_num_runs and --shuffled_num_runs. Defaults to mode setting.",
     )
     parser.add_argument(
         "--k",
@@ -411,10 +481,36 @@ Examples:
         help="Random seed for word sampling (default: 42).",
     )
     parser.add_argument(
+        "--curriculum1_name",
+        type=str,
+        default=None,
+        help="Display name for first curriculum (e.g., 'AoA', 'Frequency', 'Concreteness'). Defaults to extracting from run path.",
+    )
+    parser.add_argument(
+        "--curriculum2_name",
+        type=str,
+        default=None,
+        help="Display name for second curriculum (e.g., 'Shuffled', 'Random'). Defaults to extracting from run path.",
+    )
+    parser.add_argument(
+        "--curriculum1_tranche_type",
+        type=str,
+        default=None,
+        choices=["word-based", "sentence-based", "word-count", "matching"],
+        help="Tranche type for first curriculum: 'word-based' (unique words), 'sentence-based', 'word-count' (total words), or 'matching'.",
+    )
+    parser.add_argument(
+        "--curriculum2_tranche_type",
+        type=str,
+        default=None,
+        choices=["word-based", "sentence-based", "word-count", "matching"],
+        help="Tranche type for second curriculum: 'word-based' (unique words), 'sentence-based', 'word-count' (total words), or 'matching'.",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
-        help="Output path for the plot. Defaults to outputs/figures/aoa_vs_shuffled_overlap{suffix}.png",
+        help="Output path for the plot. Defaults to outputs/figures/{curriculum1}_vs_{curriculum2}_overlap{suffix}.png",
     )
     
     args = parser.parse_args()
@@ -423,20 +519,14 @@ Examples:
     mode_defaults = get_mode_defaults(args.mode)
     
     num_runs = args.num_runs if args.num_runs is not None else mode_defaults["num_runs"]
+    aoa_num_runs = args.aoa_num_runs if args.aoa_num_runs is not None else num_runs
+    shuffled_num_runs = args.shuffled_num_runs if args.shuffled_num_runs is not None else num_runs
     start_tranche = args.start_tranche if args.start_tranche is not None else mode_defaults["start_tranche"]
     end_tranche = args.end_tranche if args.end_tranche is not None else mode_defaults["end_tranche"]
     sample_every = args.sample_every if args.sample_every is not None else mode_defaults["sample_every"]
     word_sample_frac = args.word_sample_frac if args.word_sample_frac is not None else mode_defaults["word_sample_frac"]
     
-    # Determine output path
-    if args.output:
-        output_path = Path(args.output)
-    else:
-        output_path = Path(f"outputs/figures/aoa_vs_shuffled_overlap{mode_defaults['output_suffix']}.png")
-    
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Collect run directories based on num_runs
+    # Collect run directories based on separate num_runs
     aoa_run_paths = [
         args.aoa_run1, args.aoa_run2, args.aoa_run3, args.aoa_run4, args.aoa_run5
     ]
@@ -445,11 +535,38 @@ Examples:
         args.shuffled_run4, args.shuffled_run5
     ]
     
-    aoa_runs = [Path(p) for p in aoa_run_paths[:num_runs]]
-    shuffled_runs = [Path(p) for p in shuffled_run_paths[:num_runs]]
+    aoa_runs = [Path(p) for p in aoa_run_paths[:aoa_num_runs]]
+    shuffled_runs = [Path(p) for p in shuffled_run_paths[:shuffled_num_runs]]
+    
+    # Extract or use provided curriculum names
+    curriculum1_name = args.curriculum1_name
+    if curriculum1_name is None and aoa_runs:
+        curriculum1_name = extract_curriculum_name_from_path(aoa_runs[0])
+    
+    curriculum2_name = args.curriculum2_name
+    if curriculum2_name is None and shuffled_runs:
+        curriculum2_name = extract_curriculum_name_from_path(shuffled_runs[0])
+    
+    # Fallback defaults if extraction fails
+    if curriculum1_name is None:
+        curriculum1_name = "Curriculum 1"
+    if curriculum2_name is None:
+        curriculum2_name = "Curriculum 2"
+    
+    # Determine output path
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        # Create safe filename from curriculum names
+        safe_name1 = curriculum1_name.lower().replace(" ", "_")
+        safe_name2 = curriculum2_name.lower().replace(" ", "_")
+        output_path = Path(f"outputs/figures/{safe_name1}_vs_{safe_name2}_overlap{mode_defaults['output_suffix']}.png")
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Calculate number of pairs for display
-    num_pairs = num_runs * (num_runs - 1) // 2
+    aoa_num_pairs = aoa_num_runs * (aoa_num_runs - 1) // 2
+    shuffled_num_pairs = shuffled_num_runs * (shuffled_num_runs - 1) // 2
     
     # Print configuration
     sample_pct = int(word_sample_frac * 100)
@@ -459,7 +576,12 @@ Examples:
     print(f"Neighbor Overlap Analysis")
     print(f"{'='*60}")
     print(f"  Mode: {args.mode}")
-    print(f"  Runs: {num_runs} ({num_pairs} pairwise comparisons)")
+    print(f"  {curriculum1_name} runs: {aoa_num_runs} ({aoa_num_pairs} pairwise comparisons)")
+    if args.curriculum1_tranche_type:
+        print(f"    Tranche type: {format_tranche_type_display(args.curriculum1_tranche_type)}")
+    print(f"  {curriculum2_name} runs: {shuffled_num_runs} ({shuffled_num_pairs} pairwise comparisons)")
+    if args.curriculum2_tranche_type:
+        print(f"    Tranche type: {format_tranche_type_display(args.curriculum2_tranche_type)}")
     print(f"  Tranche range: {range_str}")
     print(f"  Tranche sampling: every {sample_every}")
     print(f"  Word sampling: {sample_pct}%")
@@ -467,8 +589,8 @@ Examples:
     print(f"  Output: {output_path}")
     print(f"{'='*60}")
     
-    # Compute overlaps for AoA curriculum
-    print(f"\n=== AoA Curriculum ({num_runs} runs) ===")
+    # Compute overlaps for first curriculum
+    print(f"\n=== {curriculum1_name} Curriculum ({aoa_num_runs} runs) ===")
     aoa_tranches, aoa_overlaps = compute_curriculum_overlap(
         aoa_runs,
         k=args.k,
@@ -479,8 +601,8 @@ Examples:
         seed=args.seed
     )
     
-    # Compute overlaps for Shuffled curriculum
-    print(f"\n=== Shuffled Curriculum ({num_runs} runs) ===")
+    # Compute overlaps for second curriculum
+    print(f"\n=== {curriculum2_name} Curriculum ({shuffled_num_runs} runs) ===")
     shuffled_tranches, shuffled_overlaps = compute_curriculum_overlap(
         shuffled_runs,
         k=args.k,
@@ -499,24 +621,24 @@ Examples:
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
-    # AoA line
+    # First curriculum line
     plt.plot(
         aoa_tranches, aoa_overlaps,
-        linewidth=1.5, color="#2E86AB", alpha=0.8, label="AoA Curriculum",
+        linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size
     )
     
-    # Shuffled line
+    # Second curriculum line
     plt.plot(
         shuffled_tranches, shuffled_overlaps,
-        linewidth=1.5, color="#E94F37", alpha=0.8, label="Shuffled Curriculum",
+        linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size
     )
     
     plt.xlabel("Training Tranche", fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
     
-    # Build title
+    # Build title with tranche type information
     run_str = f"{num_runs} Runs"
     if sample_every > 1:
         title_range = f"Every {sample_every} Tranches"
@@ -524,10 +646,32 @@ Examples:
         title_range = f"Tranches {range_str}"
     title_words = f"{sample_pct}% Words" if sample_pct < 100 else "All Words"
     
-    plt.title(
-        f"Embedding Stability: AoA vs Shuffled Curriculum\n({title_range}, {title_words}, {run_str})",
-        fontsize=13
-    )
+    # Format tranche types for display
+    tranche_type1_display = format_tranche_type_display(args.curriculum1_tranche_type)
+    tranche_type2_display = format_tranche_type_display(args.curriculum2_tranche_type)
+    
+    # Build tranche type string
+    if tranche_type1_display and tranche_type2_display:
+        if tranche_type1_display == tranche_type2_display:
+            tranche_type_str = f"({tranche_type1_display} Tranches)"
+        else:
+            tranche_type_str = f"({tranche_type1_display} vs {tranche_type2_display} Tranches)"
+    elif tranche_type1_display:
+        tranche_type_str = f"({tranche_type1_display} Tranches)"
+    elif tranche_type2_display:
+        tranche_type_str = f"({tranche_type2_display} Tranches)"
+    else:
+        tranche_type_str = ""
+    
+    # Combine title components
+    title_parts = [
+        f"Embedding Stability: {curriculum1_name} vs {curriculum2_name} Curriculum",
+        tranche_type_str,
+        f"{title_range}, {title_words}, {run_str}"
+    ]
+    title = "\n".join([p for p in title_parts if p])  # Remove empty parts
+    
+    plt.title(title, fontsize=13)
     
     plt.ylim(0, 1)
     plt.grid(True, alpha=0.3)
@@ -538,13 +682,13 @@ Examples:
         aoa_mean = np.mean(aoa_overlaps)
         plt.axhline(y=aoa_mean, color="#2E86AB", linestyle="--", alpha=0.5)
         x_pos = min(aoa_tranches) + (max(aoa_tranches) - min(aoa_tranches)) * 0.02
-        plt.text(x_pos, aoa_mean + 0.02, f"AoA mean: {aoa_mean:.3f}", color="#2E86AB", fontsize=10)
+        plt.text(x_pos, aoa_mean + 0.02, f"{curriculum1_name} mean: {aoa_mean:.3f}", color="#2E86AB", fontsize=10)
     
     if shuffled_overlaps:
         shuffled_mean = np.mean(shuffled_overlaps)
         plt.axhline(y=shuffled_mean, color="#E94F37", linestyle="--", alpha=0.5)
         x_pos = min(shuffled_tranches) + (max(shuffled_tranches) - min(shuffled_tranches)) * 0.02
-        plt.text(x_pos, shuffled_mean - 0.04, f"Shuffled mean: {shuffled_mean:.3f}", color="#E94F37", fontsize=10)
+        plt.text(x_pos, shuffled_mean - 0.04, f"{curriculum2_name} mean: {shuffled_mean:.3f}", color="#E94F37", fontsize=10)
     
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -555,11 +699,11 @@ Examples:
     print(f"Results")
     print(f"{'='*60}")
     print(f"Plot saved to: {output_path}")
-    print(f"Tranches processed: AoA={len(aoa_tranches)}, Shuffled={len(shuffled_tranches)}")
+    print(f"Tranches processed: {curriculum1_name}={len(aoa_tranches)}, {curriculum2_name}={len(shuffled_tranches)}")
     if aoa_overlaps:
-        print(f"AoA: mean={np.mean(aoa_overlaps):.4f}, min={np.min(aoa_overlaps):.4f}, max={np.max(aoa_overlaps):.4f}")
+        print(f"{curriculum1_name}: mean={np.mean(aoa_overlaps):.4f}, min={np.min(aoa_overlaps):.4f}, max={np.max(aoa_overlaps):.4f}")
     if shuffled_overlaps:
-        print(f"Shuffled: mean={np.mean(shuffled_overlaps):.4f}, min={np.min(shuffled_overlaps):.4f}, max={np.max(shuffled_overlaps):.4f}")
+        print(f"{curriculum2_name}: mean={np.mean(shuffled_overlaps):.4f}, min={np.min(shuffled_overlaps):.4f}, max={np.max(shuffled_overlaps):.4f}")
 
 
 if __name__ == "__main__":

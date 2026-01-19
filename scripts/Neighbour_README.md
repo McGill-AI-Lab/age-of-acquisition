@@ -2,6 +2,19 @@
 
 This script (`plot_neighbor_overlap.py`) measures **embedding stability** by comparing word embeddings across multiple training runs. It computes the k-nearest neighbor overlap between runs to quantify how consistently words cluster together in the embedding space.
 
+## Recent Updates
+
+### Dynamic Curriculum Labels
+- **Auto-detection**: Curriculum names are automatically extracted from run directory paths
+- **Manual override**: Use `--curriculum1_name` and `--curriculum2_name` to specify custom labels
+- **Flexible comparisons**: Compare any curricula (not just AoA vs Shuffled)
+
+### Tranche Type Display
+- **New flags**: `--curriculum1_tranche_type` and `--curriculum2_tranche_type` specify tranche types
+- **Plot titles**: Tranche type information is now included in plot titles
+- **Supported types**: `word-based` (unique words), `sentence-based`, `word-count`, `matching`
+- **Display format**: Shows as "Unique Word-Based", "Sentence-Based", etc. in titles
+
 ## How It Works
 
 1. **Load Embeddings**: For each tranche, load word embeddings from multiple training runs
@@ -21,7 +34,7 @@ python scripts/plot_neighbor_overlap.py
 # Fast analysis (recommended for initial exploration)
 python scripts/plot_neighbor_overlap.py --mode fast
 
-# Early tranches only (where AoA effect is strongest)
+# Early tranches only
 python scripts/plot_neighbor_overlap.py --mode early
 
 # Late tranches analysis
@@ -32,10 +45,10 @@ python scripts/plot_neighbor_overlap.py --mode late
 
 | Mode | Tranches | Word Sampling | Default Runs | Use Case |
 |------|----------|---------------|--------------|----------|
-| `full` | All (1+) | 100% | 2 | Complete analysis |
-| `fast` | Every 10th | 50% | 3 | Quick overview |
-| `early` | 30-200 | 100% | 3 | Early training dynamics |
-| `late` | 950+ | 50% | 3 | Late training stability |
+| `full` | All (1+) | 100%        | 2            | Complete analysis |
+| `fast` |Every 10th| 50%         |3             | Quick overview |
+| `early`| 30-200   | 100%        | 3            | Early training dynamics |
+| `late` | 950+     | 50%         | 3            | Late training stability |
 
 ## Command Line Arguments
 
@@ -47,20 +60,52 @@ python scripts/plot_neighbor_overlap.py --mode late
 
 ### Run Paths
 
-The script compares two curricula (AoA vs Shuffled), each with up to 5 training runs:
+The script compares two curricula, each with up to 5 training runs. The argument names (`--aoa_run*` and `--shuffled_run*`) are legacy but can be used for any curriculum types:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--aoa_run1` | `outputs/embeddings/aoa_50d_0` | AoA curriculum run 1 |
-| `--aoa_run2` | `outputs/embeddings/aoa_50d_1` | AoA curriculum run 2 |
-| `--aoa_run3` | `outputs/embeddings/aoa_50d_2` | AoA curriculum run 3 |
-| `--aoa_run4` | `outputs/embeddings/aoa_50d_3` | AoA curriculum run 4 |
-| `--aoa_run5` | `outputs/embeddings/aoa_50d_4` | AoA curriculum run 5 |
-| `--shuffled_run1` | `outputs/embeddings/shuffled_50d_0` | Shuffled curriculum run 1 |
-| `--shuffled_run2` | `outputs/embeddings/shuffled_50d_1` | Shuffled curriculum run 2 |
-| `--shuffled_run3` | `outputs/embeddings/shuffled_50d_2` | Shuffled curriculum run 3 |
-| `--shuffled_run4` | `outputs/embeddings/shuffled_50d_3` | Shuffled curriculum run 4 |
-| `--shuffled_run5` | `outputs/embeddings/shuffled_50d_4` | Shuffled curriculum run 5 |
+| `--aoa_run1` | `outputs/embeddings/aoa_50d_0` | First curriculum run 1 |
+| `--aoa_run2` | `outputs/embeddings/aoa_50d_1` | First curriculum run 2 |
+| `--aoa_run3` | `outputs/embeddings/aoa_50d_2` | First curriculum run 3 |
+| `--aoa_run4` | `outputs/embeddings/aoa_50d_3` | First curriculum run 4 |
+| `--aoa_run5` | `outputs/embeddings/aoa_50d_4` | First curriculum run 5 |
+| `--shuffled_run1` | `outputs/embeddings/shuffled_50d_0` | Second curriculum run 1 |
+| `--shuffled_run2` | `outputs/embeddings/shuffled_50d_1` | Second curriculum run 2 |
+| `--shuffled_run3` | `outputs/embeddings/shuffled_50d_2` | Second curriculum run 3 |
+| `--shuffled_run4` | `outputs/embeddings/shuffled_50d_3` | Second curriculum run 4 |
+| `--shuffled_run5` | `outputs/embeddings/shuffled_50d_4` | Second curriculum run 5 |
+
+### Curriculum Labels
+
+The script automatically extracts curriculum names from run paths, but you can override them:
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--curriculum1_name` | str | auto-detect | Display name for first curriculum (e.g., "AoA", "Frequency", "Concreteness") |
+| `--curriculum2_name` | str | auto-detect | Display name for second curriculum (e.g., "Shuffled", "Random") |
+
+**Auto-detection**: The script extracts curriculum names from directory paths:
+- `outputs/embeddings/aoa_50d_0` → "AoA"
+- `outputs/embeddings/freq_50d_0` → "Frequency"
+- `outputs/embeddings/conc_50d_0` → "Concreteness"
+- `outputs/embeddings/shuffled_50d_0` → "Shuffled"
+
+### Tranche Type Specification
+
+Specify the tranche type for each curriculum to display it in the plot title:
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `--curriculum1_tranche_type` | str | None | Tranche type: `word-based`, `sentence-based`, `word-count`, or `matching` |
+| `--curriculum2_tranche_type` | str | None | Tranche type: `word-based`, `sentence-based`, `word-count`, or `matching` |
+
+**Tranche Type Meanings**:
+- `word-based`: Unique word-based tranches (each tranche introduces N new vocabulary words)
+- `sentence-based`: Sentence-based tranches (each tranche contains N sentences)
+- `word-count`: Word-count tranches (each tranche contains N total word tokens)
+- `matching`: Matching tranches (matches word counts from a reference curriculum)
+
+When specified, the plot title will include tranche type information (e.g., "Unique Word-Based Tranches").
 
 ### Analysis Parameters
 
@@ -113,15 +158,25 @@ python scripts/plot_neighbor_overlap.py \
 python scripts/plot_neighbor_overlap.py --num_runs 5 --mode fast
 ```
 
-### Custom Paths
+### Custom Paths and Curriculum Names
 
 ```bash
-# Use custom embedding directories
+# Use custom embedding directories (names auto-detected from paths)
 python scripts/plot_neighbor_overlap.py \
-    --aoa_run1 path/to/aoa/run1 \
-    --aoa_run2 path/to/aoa/run2 \
+    --aoa_run1 path/to/freq/run1 \
+    --aoa_run2 path/to/freq/run2 \
     --shuffled_run1 path/to/shuffled/run1 \
     --shuffled_run2 path/to/shuffled/run2 \
+    --num_runs 2
+
+# Explicitly specify curriculum names
+python scripts/plot_neighbor_overlap.py \
+    --aoa_run1 outputs/embeddings/freq_50d_0 \
+    --aoa_run2 outputs/embeddings/freq_50d_1 \
+    --shuffled_run1 outputs/embeddings/shuffled_50d_0 \
+    --shuffled_run2 outputs/embeddings/shuffled_50d_1 \
+    --curriculum1_name Frequency \
+    --curriculum2_name Shuffled \
     --num_runs 2
 
 # Custom output path
@@ -130,24 +185,80 @@ python scripts/plot_neighbor_overlap.py \
     --output outputs/figures/my_analysis.png
 ```
 
+### Comparing Different Curricula
+
+```bash
+# Frequency vs Shuffled (not AoA)
+python scripts/plot_neighbor_overlap.py \
+    --aoa_run1 outputs/embeddings/freq_50d_0 \
+    --aoa_run2 outputs/embeddings/freq_50d_1 \
+    --shuffled_run1 outputs/embeddings/shuffled_50d_0 \
+    --shuffled_run2 outputs/embeddings/shuffled_50d_1 \
+    --curriculum1_name Frequency \
+    --curriculum2_name Shuffled \
+    --word_sample_frac 0.1 \
+    --sample_every 10 \
+    --num_runs 2
+
+# Concreteness vs Frequency
+python scripts/plot_neighbor_overlap.py \
+    --aoa_run1 outputs/embeddings/conc_50d_0 \
+    --aoa_run2 outputs/embeddings/conc_50d_1 \
+    --shuffled_run1 outputs/embeddings/freq_50d_0 \
+    --shuffled_run2 outputs/embeddings/freq_50d_1 \
+    --curriculum1_name Concreteness \
+    --curriculum2_name Frequency \
+    --num_runs 2
+```
+
+### Specifying Tranche Types
+
+```bash
+# Include tranche type in plot title (word-based)
+python scripts/plot_neighbor_overlap.py \
+    --aoa_run1 outputs/embeddings/freq_50d_0 \
+    --aoa_run2 outputs/embeddings/freq_50d_1 \
+    --shuffled_run1 outputs/embeddings/shuffled_50d_0 \
+    --shuffled_run2 outputs/embeddings/shuffled_50d_1 \
+    --curriculum1_name Frequency \
+    --curriculum2_name Shuffled \
+    --curriculum1_tranche_type word-based \
+    --curriculum2_tranche_type word-based \
+    --num_runs 2
+
+# Different tranche types
+python scripts/plot_neighbor_overlap.py \
+    --aoa_run1 outputs/embeddings/aoa_50d_0 \
+    --aoa_run2 outputs/embeddings/aoa_50d_1 \
+    --shuffled_run1 outputs/embeddings/shuffled_50d_0 \
+    --shuffled_run2 outputs/embeddings/shuffled_50d_1 \
+    --curriculum1_tranche_type word-based \
+    --curriculum2_tranche_type sentence-based \
+    --num_runs 2
+```
+
 ## Output
 
 The script generates:
 
-1. **Plot** (`outputs/figures/aoa_vs_shuffled_overlap{suffix}.png`):
+1. **Plot** (default: `outputs/figures/{curriculum1}_vs_{curriculum2}_overlap{suffix}.png`):
    - Two lines showing overlap over training tranches
-   - Blue: AoA curriculum
-   - Red: Shuffled curriculum
+   - Blue: First curriculum (default: AoA)
+   - Red: Second curriculum (default: Shuffled)
    - Dashed lines: Mean overlap for each curriculum
+   - **Title includes tranche type** when specified (e.g., "Unique Word-Based Tranches")
+   - Title format: `"Embedding Stability: {Curriculum1} vs {Curriculum2} Curriculum ({TrancheType})"`
 
 2. **Console Statistics**:
    - Mean, min, max overlap for each curriculum
    - Number of tranches processed
+   - Tranche type information (if specified)
 
 ## Interpreting Results
 
 - **Higher overlap** = More stable embeddings
-- **AoA > Shuffled**: Age-of-acquisition ordering improves stability
+- **Curriculum comparison**: Compare any two curricula (e.g., AoA vs Shuffled, Frequency vs Concreteness)
+- **Tranche type matters**: Different tranche types may show different stability patterns
 - **Early vs Late**: Compare stability at different training stages
 - **Effect size**: Typical differences are 1-5% in overlap
 
@@ -190,4 +301,5 @@ outputs/embeddings/
 Each parquet file should contain columns:
 - `word`: string - the word
 - `embedding`: array - the embedding vector
+
 
