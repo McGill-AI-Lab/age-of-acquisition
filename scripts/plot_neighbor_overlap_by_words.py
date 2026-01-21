@@ -114,6 +114,52 @@ def load_unique_word_counts(curriculum_path: str | Path | int, auto_generate: bo
     return mapping
 
 
+def load_word_counts_from_metadata(
+    embeddings_dir: Path,
+    word_count_type: str = "seen"
+) -> dict[int, int]:
+    """
+    Load word counts from training metadata.json file.
+    
+    Args:
+        embeddings_dir: Path to embeddings directory containing metadata.json
+        word_count_type: Type of word count to use:
+            - "seen": cumulative unique words encountered during training
+            - "trained": number of words in the model vocabulary (above min_count)
+        
+    Returns:
+        Dictionary mapping tranche_index -> word_count
+    """
+    metadata_file = embeddings_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise FileNotFoundError(
+            f"metadata.json not found at {metadata_file}. "
+            f"Training must be run with word count tracking enabled."
+        )
+    
+    with open(metadata_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Determine which field to use based on word_count_type
+    if word_count_type == "seen":
+        field_name = "unique_words_seen"
+    elif word_count_type == "trained":
+        field_name = "unique_words_trained"
+    else:
+        raise ValueError(f"Unknown word_count_type: {word_count_type}. Must be 'seen' or 'trained'.")
+    
+    # Create mapping: tranche_index -> word_count
+    mapping = {}
+    for entry in data.get("tranches", []):
+        tranche_idx = entry.get("tranche_index")
+        word_count = entry.get(field_name)
+        if tranche_idx is not None and word_count is not None:
+            mapping[tranche_idx] = word_count
+    
+    return mapping
+
+
 def compute_knn_overlap_n_runs(
     embeddings_list: list[tuple[list[str], np.ndarray]],
     k: int = 30,
@@ -596,6 +642,24 @@ Examples:
         default=None,
         help="Output path for the plot. Defaults to outputs/figures/{curriculum1}_vs_{curriculum2}_overlap_by_words{suffix}.png",
     )
+    parser.add_argument(
+        "--word_count_source",
+        type=str,
+        choices=["curriculum", "training"],
+        default="curriculum",
+        help="Source of word counts: 'curriculum' uses unique_word_counts.json from curriculum dir, "
+             "'training' uses metadata.json from embeddings dir (default: curriculum).",
+    )
+    parser.add_argument(
+        "--word_count_type",
+        type=str,
+        choices=["seen", "trained"],
+        default="seen",
+        help="Type of word count when using --word_count_source=training: "
+             "'seen' = cumulative unique words encountered, "
+             "'trained' = words in model vocabulary (above min_count). "
+             "(default: seen). Ignored when --word_count_source=curriculum.",
+    )
     
     args = parser.parse_args()
     
@@ -659,25 +723,54 @@ Examples:
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Load unique word counts for both curricula
+    # Load word counts based on source selection
     print(f"\n{'='*60}")
-    print(f"Loading unique word counts")
+    print(f"Loading word counts")
     print(f"{'='*60}")
-    print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_path}")
-    try:
-        curriculum1_word_counts = load_unique_word_counts(curriculum1_path)
-        print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings")
-    except Exception as e:
-        print(f"    ERROR: {e}")
-        return
+    print(f"  Source: {args.word_count_source}")
+    if args.word_count_source == "training":
+        print(f"  Type: {args.word_count_type} (unique_words_{args.word_count_type})")
     
-    print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_path}")
-    try:
-        curriculum2_word_counts = load_unique_word_counts(curriculum2_path)
-        print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings")
-    except Exception as e:
-        print(f"    ERROR: {e}")
-        return
+    if args.word_count_source == "curriculum":
+        # Load from curriculum's unique_word_counts.json
+        print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_path}")
+        try:
+            curriculum1_word_counts = load_unique_word_counts(curriculum1_path)
+            print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+        
+        print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_path}")
+        try:
+            curriculum2_word_counts = load_unique_word_counts(curriculum2_path)
+            print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+    else:
+        # Load from training's metadata.json (use first run directory as source)
+        print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_runs[0]}")
+        try:
+            curriculum1_word_counts = load_word_counts_from_metadata(
+                curriculum1_runs[0], 
+                word_count_type=args.word_count_type
+            )
+            print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings (unique_words_{args.word_count_type})")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+        
+        print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_runs[0]}")
+        try:
+            curriculum2_word_counts = load_word_counts_from_metadata(
+                curriculum2_runs[0],
+                word_count_type=args.word_count_type
+            )
+            print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings (unique_words_{args.word_count_type})")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
     
     # Calculate number of pairs for display
     curriculum1_num_pairs = curriculum1_num_runs * (curriculum1_num_runs - 1) // 2
@@ -752,7 +845,18 @@ Examples:
         marker='s' if use_markers else None, markersize=marker_size
     )
     
-    plt.xlabel("Cumulative Unique Words", fontsize=12)
+    # Determine x-axis label based on word count source/type
+    if args.word_count_source == "curriculum":
+        x_label = "Cumulative Unique Words (from Curriculum)"
+        x_axis_subtitle = "(X-axis: Cumulative Unique Words)"
+    elif args.word_count_type == "seen":
+        x_label = "Unique Words Seen During Training"
+        x_axis_subtitle = "(X-axis: Unique Words Seen)"
+    else:  # trained
+        x_label = "Unique Words Trained (in Vocabulary)"
+        x_axis_subtitle = "(X-axis: Unique Words Trained)"
+    
+    plt.xlabel(x_label, fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
     
     # Build title with tranche type information
@@ -785,7 +889,7 @@ Examples:
         f"Embedding Stability: {curriculum1_name} vs {curriculum2_name} Curriculum",
         tranche_type_str,
         f"{title_range}, {title_words}, {run_str}",
-        "(X-axis: Cumulative Unique Words)"
+        x_axis_subtitle
     ]
     title = "\n".join([p for p in title_parts if p])  # Remove empty parts
     

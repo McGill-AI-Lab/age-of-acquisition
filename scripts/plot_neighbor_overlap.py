@@ -30,6 +30,7 @@ Example usage:
 from __future__ import annotations
 
 import argparse
+import json
 from itertools import combinations
 from pathlib import Path
 from typing import Optional
@@ -61,6 +62,52 @@ def load_tranche_embeddings(tranche_path: Path) -> tuple[list[str], np.ndarray]:
 def discover_tranches(run_dir: Path) -> list[Path]:
     """Discover tranche parquet files in a run directory."""
     return sorted(run_dir.glob("tranche_*.parquet"))
+
+
+def load_word_counts_from_metadata(
+    embeddings_dir: Path,
+    word_count_type: str = "seen"
+) -> dict[int, int]:
+    """
+    Load word counts from training metadata.json file.
+    
+    Args:
+        embeddings_dir: Path to embeddings directory containing metadata.json
+        word_count_type: Type of word count to use:
+            - "seen": cumulative unique words encountered during training
+            - "trained": number of words in the model vocabulary (above min_count)
+        
+    Returns:
+        Dictionary mapping tranche_index -> word_count
+    """
+    metadata_file = embeddings_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise FileNotFoundError(
+            f"metadata.json not found at {metadata_file}. "
+            f"Training must be run with word count tracking enabled."
+        )
+    
+    with open(metadata_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Determine which field to use based on word_count_type
+    if word_count_type == "seen":
+        field_name = "unique_words_seen"
+    elif word_count_type == "trained":
+        field_name = "unique_words_trained"
+    else:
+        raise ValueError(f"Unknown word_count_type: {word_count_type}. Must be 'seen' or 'trained'.")
+    
+    # Create mapping: tranche_index -> word_count
+    mapping = {}
+    for entry in data.get("tranches", []):
+        tranche_idx = entry.get("tranche_index")
+        word_count = entry.get(field_name)
+        if tranche_idx is not None and word_count is not None:
+            mapping[tranche_idx] = word_count
+    
+    return mapping
 
 
 def compute_knn_overlap_n_runs(
@@ -521,6 +568,24 @@ Examples:
         default=None,
         help="Output path for the plot. Defaults to outputs/figures/{curriculum1}_vs_{curriculum2}_overlap{suffix}.png",
     )
+    parser.add_argument(
+        "--x_axis",
+        type=str,
+        choices=["tranche", "words"],
+        default="tranche",
+        help="What to plot on x-axis: 'tranche' (tranche number) or 'words' (unique word count). "
+             "(default: tranche)",
+    )
+    parser.add_argument(
+        "--word_count_type",
+        type=str,
+        choices=["seen", "trained"],
+        default="seen",
+        help="Type of word count when using --x_axis=words: "
+             "'seen' = cumulative unique words encountered, "
+             "'trained' = words in model vocabulary (above min_count). "
+             "(default: seen). Ignored when --x_axis=tranche.",
+    )
     
     args = parser.parse_args()
     
@@ -595,8 +660,36 @@ Examples:
     print(f"  Tranche sampling: every {sample_every}")
     print(f"  Word sampling: {sample_pct}%")
     print(f"  k: {args.k} nearest neighbors")
+    print(f"  X-axis: {args.x_axis}")
+    if args.x_axis == "words":
+        print(f"  Word count type: {args.word_count_type} (unique_words_{args.word_count_type})")
     print(f"  Output: {output_path}")
     print(f"{'='*60}")
+    
+    # Load word counts if using word-based x-axis
+    aoa_word_counts = None
+    shuffled_word_counts = None
+    if args.x_axis == "words":
+        print(f"\n=== Loading Word Counts ===")
+        try:
+            aoa_word_counts = load_word_counts_from_metadata(
+                aoa_runs[0],
+                word_count_type=args.word_count_type
+            )
+            print(f"  {curriculum1_name}: Loaded {len(aoa_word_counts)} tranche mappings from {aoa_runs[0]}")
+        except Exception as e:
+            print(f"  {curriculum1_name} ERROR: {e}")
+            return
+        
+        try:
+            shuffled_word_counts = load_word_counts_from_metadata(
+                shuffled_runs[0],
+                word_count_type=args.word_count_type
+            )
+            print(f"  {curriculum2_name}: Loaded {len(shuffled_word_counts)} tranche mappings from {shuffled_runs[0]}")
+        except Exception as e:
+            print(f"  {curriculum2_name} ERROR: {e}")
+            return
     
     # Compute overlaps for first curriculum
     print(f"\n=== {curriculum1_name} Curriculum ({aoa_num_runs} runs) ===")
@@ -625,8 +718,23 @@ Examples:
     # Plot
     plt.figure(figsize=(14, 7))
     
+    # Map tranche numbers to word counts if using word-based x-axis
+    if args.x_axis == "words":
+        aoa_x_values = [aoa_word_counts.get(t, t) for t in aoa_tranches]
+        shuffled_x_values = [shuffled_word_counts.get(t, t) for t in shuffled_tranches]
+        
+        # Determine x-axis label based on word count type
+        if args.word_count_type == "seen":
+            x_label = "Unique Words Seen During Training"
+        else:  # trained
+            x_label = "Unique Words Trained (in Vocabulary)"
+    else:
+        aoa_x_values = aoa_tranches
+        shuffled_x_values = shuffled_tranches
+        x_label = "Training Tranche"
+    
     # Determine marker size based on number of points
-    n_points = max(len(aoa_tranches), len(shuffled_tranches))
+    n_points = max(len(aoa_x_values), len(shuffled_x_values))
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
@@ -636,21 +744,21 @@ Examples:
     
     # First curriculum line with error bars
     plt.errorbar(
-        aoa_tranches, aoa_overlaps, yerr=aoa_errors_array,
+        aoa_x_values, aoa_overlaps, yerr=aoa_errors_array,
         linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(aoa_tranches) // 50) if len(aoa_tranches) > 50 else 1
+        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(aoa_x_values) // 50) if len(aoa_x_values) > 50 else 1
     )
     
     # Second curriculum line with error bars
     plt.errorbar(
-        shuffled_tranches, shuffled_overlaps, yerr=shuffled_errors_array,
+        shuffled_x_values, shuffled_overlaps, yerr=shuffled_errors_array,
         linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(shuffled_tranches) // 50) if len(shuffled_tranches) > 50 else 1
+        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(shuffled_x_values) // 50) if len(shuffled_x_values) > 50 else 1
     )
     
-    plt.xlabel("Training Tranche", fontsize=12)
+    plt.xlabel(x_label, fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
     
     # Build title with tranche type information
@@ -678,11 +786,21 @@ Examples:
     else:
         tranche_type_str = ""
     
+    # Add x-axis subtitle if using word counts
+    if args.x_axis == "words":
+        if args.word_count_type == "seen":
+            x_axis_subtitle = "(X-axis: Unique Words Seen)"
+        else:
+            x_axis_subtitle = "(X-axis: Unique Words Trained)"
+    else:
+        x_axis_subtitle = ""
+    
     # Combine title components
     title_parts = [
         f"Embedding Stability: {curriculum1_name} vs {curriculum2_name} Curriculum",
         tranche_type_str,
-        f"{title_range}, {title_words}, {run_str}"
+        f"{title_range}, {title_words}, {run_str}",
+        x_axis_subtitle
     ]
     title = "\n".join([p for p in title_parts if p])  # Remove empty parts
     
@@ -696,13 +814,13 @@ Examples:
     if aoa_overlaps:
         aoa_mean = np.mean(aoa_overlaps)
         plt.axhline(y=aoa_mean, color="#2E86AB", linestyle="--", alpha=0.5)
-        x_pos = min(aoa_tranches) + (max(aoa_tranches) - min(aoa_tranches)) * 0.02
+        x_pos = min(aoa_x_values) + (max(aoa_x_values) - min(aoa_x_values)) * 0.02
         plt.text(x_pos, aoa_mean + 0.02, f"{curriculum1_name} mean: {aoa_mean:.3f}", color="#2E86AB", fontsize=10)
     
     if shuffled_overlaps:
         shuffled_mean = np.mean(shuffled_overlaps)
         plt.axhline(y=shuffled_mean, color="#E94F37", linestyle="--", alpha=0.5)
-        x_pos = min(shuffled_tranches) + (max(shuffled_tranches) - min(shuffled_tranches)) * 0.02
+        x_pos = min(shuffled_x_values) + (max(shuffled_x_values) - min(shuffled_x_values)) * 0.02
         plt.text(x_pos, shuffled_mean - 0.04, f"{curriculum2_name} mean: {shuffled_mean:.3f}", color="#E94F37", fontsize=10)
     
     plt.tight_layout()
