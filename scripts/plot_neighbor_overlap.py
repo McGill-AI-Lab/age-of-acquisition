@@ -742,12 +742,18 @@ Examples:
     aoa_errors_array = np.array(aoa_errors)
     shuffled_errors_array = np.array(shuffled_errors)
     
+    # Dark blue and dark orange colors for error bars
+    dark_blue = "#1B4F72"  # Dark blue for first curriculum
+    dark_orange = "#C0392B"  # Dark orange/red for second curriculum
+    
     # First curriculum line with error bars
     plt.errorbar(
         aoa_x_values, aoa_overlaps, yerr=aoa_errors_array,
         linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(aoa_x_values) // 50) if len(aoa_x_values) > 50 else 1
+        capsize=3, capthick=1, elinewidth=1, 
+        ecolor=dark_blue,  # Dark blue error bars
+        errorevery=max(1, len(aoa_x_values) // 50) if len(aoa_x_values) > 50 else 1
     )
     
     # Second curriculum line with error bars
@@ -755,7 +761,9 @@ Examples:
         shuffled_x_values, shuffled_overlaps, yerr=shuffled_errors_array,
         linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1, errorevery=max(1, len(shuffled_x_values) // 50) if len(shuffled_x_values) > 50 else 1
+        capsize=3, capthick=1, elinewidth=1,
+        ecolor=dark_orange,  # Dark orange error bars
+        errorevery=max(1, len(shuffled_x_values) // 50) if len(shuffled_x_values) > 50 else 1
     )
     
     plt.xlabel(x_label, fontsize=12)

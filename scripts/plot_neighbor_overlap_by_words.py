@@ -165,11 +165,11 @@ def compute_knn_overlap_n_runs(
     k: int = 30,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> float:
+) -> tuple[float, float]:
     """
     Compute k-nearest neighbor overlap across N embedding sets (2-5 runs).
     
-    Returns the average pairwise overlap across all C(n,2) pairs.
+    Returns the average pairwise overlap across all C(n,2) pairs and its standard error.
     Only considers words that appear in all sets.
     Optionally samples a fraction of common words.
     
@@ -180,7 +180,7 @@ def compute_knn_overlap_n_runs(
         seed: Random seed for word sampling
     
     Returns:
-        Average pairwise overlap across all pairs of runs
+        (mean_overlap, std_error): Average pairwise overlap and its standard error
     """
     num_runs = len(embeddings_list)
     
@@ -189,7 +189,7 @@ def compute_knn_overlap_n_runs(
     common_words = list(set.intersection(*word_sets))
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan
     
     # Sample words if requested
     if word_sample_frac < 1.0:
@@ -200,7 +200,7 @@ def compute_knn_overlap_n_runs(
         common_words = [common_words[i] for i in sample_indices]
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan
     
     # Build word -> index mappings for each run
     idx_maps = [{w: i for i, w in enumerate(words)} for words, _ in embeddings_list]
@@ -243,7 +243,13 @@ def compute_knn_overlap_n_runs(
         avg_overlap = sum(pairwise_overlaps) / num_pairs
         all_overlaps.append(avg_overlap)
     
-    return np.mean(all_overlaps)
+    # Compute mean and standard error
+    mean_overlap = np.mean(all_overlaps)
+    std_overlap = np.std(all_overlaps, ddof=1)  # Sample standard deviation
+    n_words = len(all_overlaps)
+    std_error = std_overlap / np.sqrt(n_words) if n_words > 1 else 0.0
+    
+    return mean_overlap, std_error
 
 
 def compute_curriculum_overlap(
@@ -255,7 +261,7 @@ def compute_curriculum_overlap(
     sample_every: int = 1,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> tuple[list[int], list[float]]:
+) -> tuple[list[int], list[float], list[float]]:
     """
     Compute per-tranche overlap across multiple runs, returning unique word counts as x-values.
     
@@ -272,6 +278,7 @@ def compute_curriculum_overlap(
     Returns:
         unique_word_counts: List of cumulative unique word counts (x-axis values)
         overlaps: List of overlap values
+        errors: List of standard errors for each overlap
     """
     num_runs = len(run_dirs)
     assert 2 <= num_runs <= 5, "Must provide 2-5 run directories"
@@ -294,6 +301,7 @@ def compute_curriculum_overlap(
     
     unique_word_counts = []
     overlaps = []
+    errors = []
     
     # Build description string
     sample_pct = int(word_sample_frac * 100)
@@ -325,7 +333,7 @@ def compute_curriculum_overlap(
             # Use tranche number as additional seed component for reproducibility
             tranche_seed = seed + tranche_num
             
-            overlap = compute_knn_overlap_n_runs(
+            overlap, error = compute_knn_overlap_n_runs(
                 embeddings_data,
                 k=k,
                 word_sample_frac=word_sample_frac,
@@ -335,10 +343,11 @@ def compute_curriculum_overlap(
             if not np.isnan(overlap):
                 unique_word_counts.append(cumulative_words)
                 overlaps.append(overlap)
+                errors.append(error)
         except Exception as e:
             print(f"Warning: Failed to process {tranche_name}: {e}")
     
-    return unique_word_counts, overlaps
+    return unique_word_counts, overlaps, errors
 
 
 def format_tranche_type_display(tranche_type: str | None) -> str:
@@ -799,7 +808,7 @@ Examples:
     
     # Compute overlaps for first curriculum
     print(f"\n=== {curriculum1_name} Curriculum ({curriculum1_num_runs} runs) ===")
-    curriculum1_word_counts_list, curriculum1_overlaps = compute_curriculum_overlap(
+    curriculum1_word_counts_list, curriculum1_overlaps, curriculum1_errors = compute_curriculum_overlap(
         curriculum1_runs,
         curriculum1_word_counts,
         k=args.k,
@@ -812,7 +821,7 @@ Examples:
     
     # Compute overlaps for second curriculum
     print(f"\n=== {curriculum2_name} Curriculum ({curriculum2_num_runs} runs) ===")
-    curriculum2_word_counts_list, curriculum2_overlaps = compute_curriculum_overlap(
+    curriculum2_word_counts_list, curriculum2_overlaps, curriculum2_errors = compute_curriculum_overlap(
         curriculum2_runs,
         curriculum2_word_counts,
         k=args.k,
@@ -831,18 +840,32 @@ Examples:
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
-    # First curriculum line
-    plt.plot(
-        curriculum1_word_counts_list, curriculum1_overlaps,
+    # Convert errors to numpy arrays for errorbar
+    curriculum1_errors_array = np.array(curriculum1_errors)
+    curriculum2_errors_array = np.array(curriculum2_errors)
+    
+    # Dark blue and dark orange colors for error bars
+    dark_blue = "#1B4F72"  # Dark blue for first curriculum
+    dark_orange = "#C0392B"  # Dark orange/red for second curriculum
+    
+    # First curriculum line with error bars
+    plt.errorbar(
+        curriculum1_word_counts_list, curriculum1_overlaps, yerr=curriculum1_errors_array,
         linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
-        marker='o' if use_markers else None, markersize=marker_size
+        marker='o' if use_markers else None, markersize=marker_size,
+        capsize=3, capthick=1, elinewidth=1, 
+        ecolor=dark_blue,  # Dark blue error bars
+        errorevery=max(1, len(curriculum1_word_counts_list) // 50) if len(curriculum1_word_counts_list) > 50 else 1
     )
     
-    # Second curriculum line
-    plt.plot(
-        curriculum2_word_counts_list, curriculum2_overlaps,
+    # Second curriculum line with error bars
+    plt.errorbar(
+        curriculum2_word_counts_list, curriculum2_overlaps, yerr=curriculum2_errors_array,
         linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
-        marker='s' if use_markers else None, markersize=marker_size
+        marker='s' if use_markers else None, markersize=marker_size,
+        capsize=3, capthick=1, elinewidth=1,
+        ecolor=dark_orange,  # Dark orange error bars
+        errorevery=max(1, len(curriculum2_word_counts_list) // 50) if len(curriculum2_word_counts_list) > 50 else 1
     )
     
     # Determine x-axis label based on word count source/type
