@@ -31,7 +31,8 @@
       multiword: bool = False,
       skip_stopwords: bool = False,
       inflect: bool = True,
-      duplication_cap: int = -1
+      duplication_cap: int = -1,
+      fake_aoa_seed: int = None, # only useful for fake aoa control study
     )
 
     # builds a shuffled curriculum with matching number of words as another curriculum
@@ -70,3 +71,4 @@
     - `tranche_type="matching"` builds tranches based on the number of words in each tranche in a specified curriculum, given by `matching_idx`.
     - `tranche_type="word-count"` builds tranches by ensuring that each tranch contains as close to `tranche_size` number of words as possible. These words are *not necessarily unique*, compared to `tranche_type="word-based"` where each tranche introduces `tranche_size` number of *unique* words.
     - Do not rename curriculum folder names! They are used by plotting, sampling, and shuffling.
+    - `fake_aoa_seed` is used only for a fake aoa control study. Note that this option requires that `inflect=True`.
