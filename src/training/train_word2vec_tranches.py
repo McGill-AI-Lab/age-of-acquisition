@@ -23,6 +23,10 @@ Output format:
     One parquet file per tranche saved to the output directory with schema:
         - word: str (the word)
         - embedding: list[float] (the word vector)
+    
+    Additionally, a metadata.json file is saved with statistics per tranche:
+        - unique_words_seen: cumulative count of unique words encountered
+        - unique_words_trained: number of words in the model vocabulary
 
 Hyperparameters (defaults):
     - Epochs: 1
@@ -47,6 +51,7 @@ Example usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 from pathlib import Path
@@ -309,6 +314,23 @@ def main():
     # Step 2: Incremental training - train on each tranche and save embeddings
     logging.info("Starting incremental training...")
     
+    # Track cumulative unique words seen across all tranches
+    cumulative_words_seen = set()
+    
+    # Metadata to track statistics per tranche
+    metadata = {
+        "tranches": [],
+        "training_config": {
+            "vector_size": args.vector_size,
+            "window": args.window,
+            "min_count": args.min_count,
+            "epochs": args.epochs,
+            "sg": args.sg,
+            "negative": args.negative,
+            "alpha": args.alpha,
+        }
+    }
+    
     for i, tranche_path in enumerate(tqdm(tranche_paths, desc="Training tranches")):
         # Use parent directory name (e.g., tranche_0001) as the tranche name
         tranche_name = tranche_path.parent.name if tranche_path.name == "data.parquet" else tranche_path.stem
@@ -320,6 +342,12 @@ def main():
             logging.warning(f"Tranche {i} ({tranche_name}): No sentences found")
             continue
         
+        # Collect vocabulary for this tranche (before training)
+        tranche_vocab = collect_tranche_vocabulary(tranche_path)
+        
+        # Update cumulative unique words seen
+        cumulative_words_seen.update(tranche_vocab)
+        
         # Train on this tranche (1 epoch)
         model.train(
             corpus_iterable=tranche_sentences,
@@ -328,8 +356,8 @@ def main():
             compute_loss=False
         )
         
-        # Collect vocabulary for this tranche
-        tranche_vocab = collect_tranche_vocabulary(tranche_path)
+        # Get number of unique words trained with (model vocabulary size)
+        unique_words_trained = len(model.wv)
         
         # Filter to words in the model vocabulary
         words_in_model = [w for w in tranche_vocab if w in model.wv]
@@ -345,6 +373,23 @@ def main():
         output_path = output_dir / f"{tranche_name}.parquet"
         save_embeddings_parquet(words_in_model, embeddings, output_path)
         
+        # Record statistics for this tranche
+        metadata["tranches"].append({
+            "tranche_name": tranche_name,
+            "tranche_index": i,
+            "unique_words_seen": len(cumulative_words_seen),
+            "unique_words_trained": unique_words_trained,
+            "words_in_tranche": len(tranche_vocab),
+            "words_in_model_from_tranche": len(words_in_model),
+        })
+        
+        # Log statistics
+        logging.info(
+            f"Tranche {i} ({tranche_name}): "
+            f"Seen {len(cumulative_words_seen):,} unique words total, "
+            f"Trained with {unique_words_trained:,} words in vocabulary"
+        )
+        
         if (i + 1) % 100 == 0:
             logging.info(f"Completed {i + 1}/{len(tranche_paths)} tranches")
     
@@ -352,6 +397,21 @@ def main():
     model_path = output_dir / "word2vec.model"
     model.save(str(model_path))
     logging.info(f"Saved final model to {model_path}")
+    
+    # Save metadata with word statistics
+    metadata_path = output_dir / "metadata.json"
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    logging.info(f"Saved training metadata to {metadata_path}")
+    
+    # Log final statistics
+    final_unique_seen = len(cumulative_words_seen)
+    final_unique_trained = len(model.wv)
+    logging.info(
+        f"Final statistics: "
+        f"Unique words seen: {final_unique_seen:,}, "
+        f"Unique words trained: {final_unique_trained:,}"
+    )
     
     logging.info(f"Done! Saved {len(tranche_paths)} tranche embeddings to {output_dir}")
 

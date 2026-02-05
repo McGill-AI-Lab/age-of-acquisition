@@ -114,17 +114,64 @@ def load_unique_word_counts(curriculum_path: str | Path | int, auto_generate: bo
     return mapping
 
 
+def load_word_counts_from_metadata(
+    embeddings_dir: Path,
+    word_count_type: str = "seen"
+) -> dict[int, int]:
+    """
+    Load word counts from training metadata.json file.
+    
+    Args:
+        embeddings_dir: Path to embeddings directory containing metadata.json
+        word_count_type: Type of word count to use:
+            - "seen": cumulative unique words encountered during training
+            - "trained": number of words in the model vocabulary (above min_count)
+        
+    Returns:
+        Dictionary mapping tranche_index -> word_count
+    """
+    metadata_file = embeddings_dir / "metadata.json"
+    
+    if not metadata_file.exists():
+        raise FileNotFoundError(
+            f"metadata.json not found at {metadata_file}. "
+            f"Training must be run with word count tracking enabled."
+        )
+    
+    with open(metadata_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Determine which field to use based on word_count_type
+    if word_count_type == "seen":
+        field_name = "unique_words_seen"
+    elif word_count_type == "trained":
+        field_name = "unique_words_trained"
+    else:
+        raise ValueError(f"Unknown word_count_type: {word_count_type}. Must be 'seen' or 'trained'.")
+    
+    # Create mapping: tranche_index -> word_count
+    mapping = {}
+    for entry in data.get("tranches", []):
+        tranche_idx = entry.get("tranche_index")
+        word_count = entry.get(field_name)
+        if tranche_idx is not None and word_count is not None:
+            mapping[tranche_idx] = word_count
+    
+    return mapping
+
+
 def compute_knn_overlap_n_runs(
     embeddings_list: list[tuple[list[str], np.ndarray]],
     k: int = 30,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> float:
+) -> tuple[float, float, float]:
     """
     Compute k-nearest neighbor overlap across N embedding sets (2-5 runs).
     
-    Returns the average pairwise overlap across all C(n,2) pairs.
-    Only considers words that appear in all sets.
+    Returns the average pairwise overlap across all C(n,2) run pairs and the
+    standard error/standard deviation computed over those pairwise averages
+    (run-to-run variability). Only considers words that appear in all sets.
     Optionally samples a fraction of common words.
     
     Args:
@@ -134,7 +181,9 @@ def compute_knn_overlap_n_runs(
         seed: Random seed for word sampling
     
     Returns:
-        Average pairwise overlap across all pairs of runs
+        (mean_overlap, std_error, std_dev): Average pairwise overlap, its
+        standard error (SEM over run-pair means), and the standard deviation of
+        run-pair means
     """
     num_runs = len(embeddings_list)
     
@@ -143,7 +192,7 @@ def compute_knn_overlap_n_runs(
     common_words = list(set.intersection(*word_sets))
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan, np.nan
     
     # Sample words if requested
     if word_sample_frac < 1.0:
@@ -154,7 +203,7 @@ def compute_knn_overlap_n_runs(
         common_words = [common_words[i] for i in sample_indices]
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan, np.nan
     
     # Build word -> index mappings for each run
     idx_maps = [{w: i for i, w in enumerate(words)} for words, _ in embeddings_list]
@@ -175,11 +224,11 @@ def compute_knn_overlap_n_runs(
         _, indices = nbrs.kneighbors(emb)
         all_indices.append(indices)
     
-    # Compute pairwise overlaps for each word, then average across all pairs
-    # Number of pairs = C(num_runs, 2) = num_runs * (num_runs - 1) / 2
-    num_pairs = num_runs * (num_runs - 1) // 2
+    # Compute overlaps per run pair across words, then aggregate across pairs.
+    pair_overlaps: dict[tuple[int, int], list[float]] = {
+        (i, j): [] for i, j in combinations(range(num_runs), 2)
+    }
     
-    all_overlaps = []
     for word_idx in range(len(common_words)):
         # Get neighbor words for this word from each run
         neighbor_sets = []
@@ -187,17 +236,26 @@ def compute_knn_overlap_n_runs(
             neighbors = {common_words[j] for j in run_indices[word_idx][1:k+1]}
             neighbor_sets.append(neighbors)
         
-        # Compute pairwise overlaps
-        pairwise_overlaps = []
+        # Collect overlap for each pair for this word
         for i, j in combinations(range(num_runs), 2):
             overlap = len(neighbor_sets[i] & neighbor_sets[j]) / k
-            pairwise_overlaps.append(overlap)
-        
-        # Average across all pairs for this word
-        avg_overlap = sum(pairwise_overlaps) / num_pairs
-        all_overlaps.append(avg_overlap)
+            pair_overlaps[(i, j)].append(overlap)
     
-    return np.mean(all_overlaps)
+    # Average overlap per run pair across words
+    pairwise_means = []
+    for overlaps in pair_overlaps.values():
+        if overlaps:
+            pairwise_means.append(np.mean(overlaps))
+    
+    if not pairwise_means:
+        return np.nan, np.nan, np.nan
+    
+    mean_overlap = float(np.mean(pairwise_means))
+    # Standard deviation over run-pair means (population) and corresponding SEM
+    std_dev = float(np.std(pairwise_means, ddof=0))
+    std_error = float(std_dev / np.sqrt(len(pairwise_means)))
+    
+    return mean_overlap, std_error, std_dev
 
 
 def compute_curriculum_overlap(
@@ -209,7 +267,7 @@ def compute_curriculum_overlap(
     sample_every: int = 1,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> tuple[list[int], list[float]]:
+) -> tuple[list[int], list[float], list[float], list[float]]:
     """
     Compute per-tranche overlap across multiple runs, returning unique word counts as x-values.
     
@@ -226,6 +284,8 @@ def compute_curriculum_overlap(
     Returns:
         unique_word_counts: List of cumulative unique word counts (x-axis values)
         overlaps: List of overlap values
+        errors: List of standard errors for each overlap
+        std_devs: List of standard deviations for each overlap
     """
     num_runs = len(run_dirs)
     assert 2 <= num_runs <= 5, "Must provide 2-5 run directories"
@@ -248,6 +308,8 @@ def compute_curriculum_overlap(
     
     unique_word_counts = []
     overlaps = []
+    errors = []
+    std_devs = []
     
     # Build description string
     sample_pct = int(word_sample_frac * 100)
@@ -279,7 +341,7 @@ def compute_curriculum_overlap(
             # Use tranche number as additional seed component for reproducibility
             tranche_seed = seed + tranche_num
             
-            overlap = compute_knn_overlap_n_runs(
+            overlap, error, std_dev = compute_knn_overlap_n_runs(
                 embeddings_data,
                 k=k,
                 word_sample_frac=word_sample_frac,
@@ -289,10 +351,12 @@ def compute_curriculum_overlap(
             if not np.isnan(overlap):
                 unique_word_counts.append(cumulative_words)
                 overlaps.append(overlap)
+                errors.append(error)
+                std_devs.append(std_dev)
         except Exception as e:
             print(f"Warning: Failed to process {tranche_name}: {e}")
     
-    return unique_word_counts, overlaps
+    return unique_word_counts, overlaps, errors, std_devs
 
 
 def format_tranche_type_display(tranche_type: str | None) -> str:
@@ -596,6 +660,24 @@ Examples:
         default=None,
         help="Output path for the plot. Defaults to outputs/figures/{curriculum1}_vs_{curriculum2}_overlap_by_words{suffix}.png",
     )
+    parser.add_argument(
+        "--word_count_source",
+        type=str,
+        choices=["curriculum", "training"],
+        default="curriculum",
+        help="Source of word counts: 'curriculum' uses unique_word_counts.json from curriculum dir, "
+             "'training' uses metadata.json from embeddings dir (default: curriculum).",
+    )
+    parser.add_argument(
+        "--word_count_type",
+        type=str,
+        choices=["seen", "trained"],
+        default="seen",
+        help="Type of word count when using --word_count_source=training: "
+             "'seen' = cumulative unique words encountered, "
+             "'trained' = words in model vocabulary (above min_count). "
+             "(default: seen). Ignored when --word_count_source=curriculum.",
+    )
     
     args = parser.parse_args()
     
@@ -659,25 +741,54 @@ Examples:
     
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Load unique word counts for both curricula
+    # Load word counts based on source selection
     print(f"\n{'='*60}")
-    print(f"Loading unique word counts")
+    print(f"Loading word counts")
     print(f"{'='*60}")
-    print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_path}")
-    try:
-        curriculum1_word_counts = load_unique_word_counts(curriculum1_path)
-        print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings")
-    except Exception as e:
-        print(f"    ERROR: {e}")
-        return
+    print(f"  Source: {args.word_count_source}")
+    if args.word_count_source == "training":
+        print(f"  Type: {args.word_count_type} (unique_words_{args.word_count_type})")
     
-    print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_path}")
-    try:
-        curriculum2_word_counts = load_unique_word_counts(curriculum2_path)
-        print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings")
-    except Exception as e:
-        print(f"    ERROR: {e}")
-        return
+    if args.word_count_source == "curriculum":
+        # Load from curriculum's unique_word_counts.json
+        print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_path}")
+        try:
+            curriculum1_word_counts = load_unique_word_counts(curriculum1_path)
+            print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+        
+        print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_path}")
+        try:
+            curriculum2_word_counts = load_unique_word_counts(curriculum2_path)
+            print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+    else:
+        # Load from training's metadata.json (use first run directory as source)
+        print(f"  Curriculum 1 ({curriculum1_name}): {curriculum1_runs[0]}")
+        try:
+            curriculum1_word_counts = load_word_counts_from_metadata(
+                curriculum1_runs[0], 
+                word_count_type=args.word_count_type
+            )
+            print(f"    Loaded {len(curriculum1_word_counts)} tranche mappings (unique_words_{args.word_count_type})")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
+        
+        print(f"  Curriculum 2 ({curriculum2_name}): {curriculum2_runs[0]}")
+        try:
+            curriculum2_word_counts = load_word_counts_from_metadata(
+                curriculum2_runs[0],
+                word_count_type=args.word_count_type
+            )
+            print(f"    Loaded {len(curriculum2_word_counts)} tranche mappings (unique_words_{args.word_count_type})")
+        except Exception as e:
+            print(f"    ERROR: {e}")
+            return
     
     # Calculate number of pairs for display
     curriculum1_num_pairs = curriculum1_num_runs * (curriculum1_num_runs - 1) // 2
@@ -706,7 +817,7 @@ Examples:
     
     # Compute overlaps for first curriculum
     print(f"\n=== {curriculum1_name} Curriculum ({curriculum1_num_runs} runs) ===")
-    curriculum1_word_counts_list, curriculum1_overlaps = compute_curriculum_overlap(
+    curriculum1_word_counts_list, curriculum1_overlaps, curriculum1_errors, curriculum1_std_devs = compute_curriculum_overlap(
         curriculum1_runs,
         curriculum1_word_counts,
         k=args.k,
@@ -719,7 +830,7 @@ Examples:
     
     # Compute overlaps for second curriculum
     print(f"\n=== {curriculum2_name} Curriculum ({curriculum2_num_runs} runs) ===")
-    curriculum2_word_counts_list, curriculum2_overlaps = compute_curriculum_overlap(
+    curriculum2_word_counts_list, curriculum2_overlaps, curriculum2_errors, curriculum2_std_devs = compute_curriculum_overlap(
         curriculum2_runs,
         curriculum2_word_counts,
         k=args.k,
@@ -731,6 +842,7 @@ Examples:
     )
     
     # Plot
+    plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(14, 7))
     
     # Determine marker size based on number of points
@@ -738,21 +850,48 @@ Examples:
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
-    # First curriculum line
+    # Convert errors/std devs to numpy arrays for plotting
+    curriculum1_errors_array = np.array(curriculum1_errors)
+    curriculum2_errors_array = np.array(curriculum2_errors)
+    curriculum1_std_dev = np.array(curriculum1_std_devs)
+    curriculum2_std_dev = np.array(curriculum2_std_devs)
+    
+    # Plot lines first
     plt.plot(
         curriculum1_word_counts_list, curriculum1_overlaps,
-        linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
+        linewidth=2, color="#2E86AB", alpha=1.0, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size
     )
     
-    # Second curriculum line
     plt.plot(
         curriculum2_word_counts_list, curriculum2_overlaps,
-        linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
+        linewidth=2, color="#E94F37", alpha=1.0, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size
     )
     
-    plt.xlabel("Cumulative Unique Words", fontsize=12)
+    # Add shaded error bands (+/- 1 standard deviation across run-pair means)
+    # Light blue for first curriculum
+    curriculum1_upper = np.array(curriculum1_overlaps) + curriculum1_std_dev
+    curriculum1_lower = np.array(curriculum1_overlaps) - curriculum1_std_dev
+    plt.fill_between(curriculum1_word_counts_list, curriculum1_lower, curriculum1_upper, color="#87CEEB", alpha=0.2)  # Light blue
+    
+    # Light orange for second curriculum  
+    curriculum2_upper = np.array(curriculum2_overlaps) + curriculum2_std_dev
+    curriculum2_lower = np.array(curriculum2_overlaps) - curriculum2_std_dev
+    plt.fill_between(curriculum2_word_counts_list, curriculum2_lower, curriculum2_upper, color="#FFB366", alpha=0.2)  # Light orange
+    
+    # Determine x-axis label based on word count source/type
+    if args.word_count_source == "curriculum":
+        x_label = "Cumulative Unique Words (from Curriculum)"
+        x_axis_subtitle = "(X-axis: Cumulative Unique Words)"
+    elif args.word_count_type == "seen":
+        x_label = "Unique Words Seen During Training"
+        x_axis_subtitle = "(X-axis: Unique Words Seen)"
+    else:  # trained
+        x_label = "Unique Words Trained (in Vocabulary)"
+        x_axis_subtitle = "(X-axis: Unique Words Trained)"
+    
+    plt.xlabel(x_label, fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
     
     # Build title with tranche type information
@@ -785,7 +924,7 @@ Examples:
         f"Embedding Stability: {curriculum1_name} vs {curriculum2_name} Curriculum",
         tranche_type_str,
         f"{title_range}, {title_words}, {run_str}",
-        "(X-axis: Cumulative Unique Words)"
+        x_axis_subtitle
     ]
     title = "\n".join([p for p in title_parts if p])  # Remove empty parts
     
