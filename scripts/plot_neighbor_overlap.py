@@ -115,13 +115,14 @@ def compute_knn_overlap_n_runs(
     k: int = 30,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """
     Compute k-nearest neighbor overlap across N embedding sets (2-5 runs).
     
-    Returns the average pairwise overlap across all C(n,2) pairs and its standard error.
-    Only considers words that appear in all sets.
-    Optionally samples a fraction of common words.
+    Returns the average pairwise overlap across all C(n,2) run pairs and both
+    the standard error and standard deviation computed over those pairwise
+    averages (run-to-run variability). Only considers words that appear in all
+    sets. Optionally samples a fraction of common words.
     
     Args:
         embeddings_list: List of (words, embeddings) tuples, one per run
@@ -130,7 +131,9 @@ def compute_knn_overlap_n_runs(
         seed: Random seed for word sampling
     
     Returns:
-        (mean_overlap, std_error): Average pairwise overlap and its standard error
+        (mean_overlap, std_error, std_dev): Average pairwise overlap, its standard
+        error (SEM over run-pair means), and the standard deviation of run-pair
+        means
     """
     num_runs = len(embeddings_list)
     
@@ -139,7 +142,7 @@ def compute_knn_overlap_n_runs(
     common_words = list(set.intersection(*word_sets))
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan, np.nan
     
     # Sample words if requested
     if word_sample_frac < 1.0:
@@ -150,7 +153,7 @@ def compute_knn_overlap_n_runs(
         common_words = [common_words[i] for i in sample_indices]
     
     if len(common_words) < k + 1:
-        return np.nan
+        return np.nan, np.nan, np.nan
     
     # Build word -> index mappings for each run
     idx_maps = [{w: i for i, w in enumerate(words)} for words, _ in embeddings_list]
@@ -171,11 +174,11 @@ def compute_knn_overlap_n_runs(
         _, indices = nbrs.kneighbors(emb)
         all_indices.append(indices)
     
-    # Compute pairwise overlaps for each word, then average across all pairs
-    # Number of pairs = C(num_runs, 2) = num_runs * (num_runs - 1) / 2
-    num_pairs = num_runs * (num_runs - 1) // 2
+    # Compute overlaps per run pair across words, then aggregate across pairs.
+    pair_overlaps: dict[tuple[int, int], list[float]] = {
+        (i, j): [] for i, j in combinations(range(num_runs), 2)
+    }
     
-    all_overlaps = []
     for word_idx in range(len(common_words)):
         # Get neighbor words for this word from each run
         neighbor_sets = []
@@ -183,23 +186,26 @@ def compute_knn_overlap_n_runs(
             neighbors = {common_words[j] for j in run_indices[word_idx][1:k+1]}
             neighbor_sets.append(neighbors)
         
-        # Compute pairwise overlaps
-        pairwise_overlaps = []
+        # Collect overlap for each pair for this word
         for i, j in combinations(range(num_runs), 2):
             overlap = len(neighbor_sets[i] & neighbor_sets[j]) / k
-            pairwise_overlaps.append(overlap)
-        
-        # Average across all pairs for this word
-        avg_overlap = sum(pairwise_overlaps) / num_pairs
-        all_overlaps.append(avg_overlap)
+            pair_overlaps[(i, j)].append(overlap)
     
-    # Compute mean and standard error
-    mean_overlap = np.mean(all_overlaps)
-    std_overlap = np.std(all_overlaps, ddof=1)  # Sample standard deviation
-    n_words = len(all_overlaps)
-    std_error = std_overlap / np.sqrt(n_words) if n_words > 1 else 0.0
+    # Average overlap per run pair across words
+    pairwise_means = []
+    for overlaps in pair_overlaps.values():
+        if overlaps:
+            pairwise_means.append(np.mean(overlaps))
     
-    return mean_overlap, std_error
+    if not pairwise_means:
+        return np.nan, np.nan, np.nan
+    
+    mean_overlap = float(np.mean(pairwise_means))
+    # Standard deviation over run-pair means (population) and corresponding SEM
+    std_dev = float(np.std(pairwise_means, ddof=0))
+    std_error = float(std_dev / np.sqrt(len(pairwise_means)))
+    
+    return mean_overlap, std_error, std_dev
 
 
 def compute_curriculum_overlap(
@@ -210,7 +216,7 @@ def compute_curriculum_overlap(
     sample_every: int = 1,
     word_sample_frac: float = 1.0,
     seed: int = 42
-) -> tuple[list[int], list[float], list[float]]:
+) -> tuple[list[int], list[float], list[float], list[float]]:
     """
     Compute per-tranche overlap across multiple runs.
     
@@ -227,6 +233,7 @@ def compute_curriculum_overlap(
         tranche_numbers: List of tranche indices
         overlaps: List of overlap mean values
         errors: List of standard errors for each overlap
+        std_devs: List of standard deviations for each overlap
     """
     num_runs = len(run_dirs)
     assert 2 <= num_runs <= 5, "Must provide 2-5 run directories"
@@ -250,6 +257,7 @@ def compute_curriculum_overlap(
     tranche_numbers = []
     overlaps = []
     errors = []
+    std_devs = []
     
     # Build description string
     sample_pct = int(word_sample_frac * 100)
@@ -274,7 +282,7 @@ def compute_curriculum_overlap(
             # Use tranche number as additional seed component for reproducibility
             tranche_seed = seed + tranche_num
             
-            overlap, error = compute_knn_overlap_n_runs(
+            overlap, error, std_dev = compute_knn_overlap_n_runs(
                 embeddings_data,
                 k=k,
                 word_sample_frac=word_sample_frac,
@@ -285,10 +293,11 @@ def compute_curriculum_overlap(
                 tranche_numbers.append(tranche_num)
                 overlaps.append(overlap)
                 errors.append(error)
+                std_devs.append(std_dev)
         except Exception as e:
             print(f"Warning: Failed to process {tranche_name}: {e}")
     
-    return tranche_numbers, overlaps, errors
+    return tranche_numbers, overlaps, errors, std_devs
 
 
 def format_tranche_type_display(tranche_type: str | None) -> str:
@@ -693,7 +702,7 @@ Examples:
     
     # Compute overlaps for first curriculum
     print(f"\n=== {curriculum1_name} Curriculum ({aoa_num_runs} runs) ===")
-    aoa_tranches, aoa_overlaps, aoa_errors = compute_curriculum_overlap(
+    aoa_tranches, aoa_overlaps, aoa_errors, aoa_std_devs = compute_curriculum_overlap(
         aoa_runs,
         k=args.k,
         start_tranche=start_tranche,
@@ -705,7 +714,7 @@ Examples:
     
     # Compute overlaps for second curriculum
     print(f"\n=== {curriculum2_name} Curriculum ({shuffled_num_runs} runs) ===")
-    shuffled_tranches, shuffled_overlaps, shuffled_errors = compute_curriculum_overlap(
+    shuffled_tranches, shuffled_overlaps, shuffled_errors, shuffled_std_devs = compute_curriculum_overlap(
         shuffled_runs,
         k=args.k,
         start_tranche=start_tranche,
@@ -716,6 +725,7 @@ Examples:
     )
     
     # Plot
+    plt.style.use("seaborn-v0_8-whitegrid")
     plt.figure(figsize=(14, 7))
     
     # Map tranche numbers to word counts if using word-based x-axis
@@ -738,33 +748,35 @@ Examples:
     marker_size = 4 if n_points < 200 else 2 if n_points < 500 else 1
     use_markers = n_points < 300
     
-    # Convert errors to numpy arrays for errorbar
+    # Convert to numpy arrays - use actual standard deviations for bands
     aoa_errors_array = np.array(aoa_errors)
     shuffled_errors_array = np.array(shuffled_errors)
+    aoa_std_dev_array = np.array(aoa_std_devs)
+    shuffled_std_dev_array = np.array(shuffled_std_devs)
     
-    # Dark blue and dark orange colors for error bars
-    dark_blue = "#1B4F72"  # Dark blue for first curriculum
-    dark_orange = "#C0392B"  # Dark orange/red for second curriculum
-    
-    # First curriculum line with error bars
-    plt.errorbar(
-        aoa_x_values, aoa_overlaps, yerr=aoa_errors_array,
-        linewidth=1.5, color="#2E86AB", alpha=0.8, label=f"{curriculum1_name} Curriculum",
-        marker='o' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1, 
-        ecolor=dark_blue,  # Dark blue error bars
-        errorevery=max(1, len(aoa_x_values) // 50) if len(aoa_x_values) > 50 else 1
+    # Plot lines first
+    plt.plot(
+        aoa_x_values, aoa_overlaps,
+        linewidth=2, color="#2E86AB", alpha=1.0, label=f"{curriculum1_name} Curriculum",
+        marker='o' if use_markers else None, markersize=marker_size
     )
     
-    # Second curriculum line with error bars
-    plt.errorbar(
-        shuffled_x_values, shuffled_overlaps, yerr=shuffled_errors_array,
-        linewidth=1.5, color="#E94F37", alpha=0.8, label=f"{curriculum2_name} Curriculum",
-        marker='s' if use_markers else None, markersize=marker_size,
-        capsize=3, capthick=1, elinewidth=1,
-        ecolor=dark_orange,  # Dark orange error bars
-        errorevery=max(1, len(shuffled_x_values) // 50) if len(shuffled_x_values) > 50 else 1
+    plt.plot(
+        shuffled_x_values, shuffled_overlaps,
+        linewidth=2, color="#E94F37", alpha=1.0, label=f"{curriculum2_name} Curriculum",
+        marker='s' if use_markers else None, markersize=marker_size
     )
+    
+    # Add shaded error bands (+/- 1 standard deviation across run-pair means)
+    # Light blue for first curriculum
+    aoa_upper = np.array(aoa_overlaps) + aoa_std_dev_array
+    aoa_lower = np.array(aoa_overlaps) - aoa_std_dev_array
+    plt.fill_between(aoa_x_values, aoa_lower, aoa_upper, color="#87CEEB", alpha=0.2, label=f"{curriculum1_name} ± std")  # Light blue
+    
+    # Light orange for second curriculum  
+    shuffled_upper = np.array(shuffled_overlaps) + shuffled_std_dev_array
+    shuffled_lower = np.array(shuffled_overlaps) - shuffled_std_dev_array
+    plt.fill_between(shuffled_x_values, shuffled_lower, shuffled_upper, color="#FFB366", alpha=0.2, label=f"{curriculum2_name} ± std")  # Light orange
     
     plt.xlabel(x_label, fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
