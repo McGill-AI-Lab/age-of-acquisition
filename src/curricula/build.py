@@ -16,6 +16,10 @@ from curricula.path_utils import resolve_curriculum_path
 
 from sentence_scoring import score_sentence
 
+from lexical_features.scoring_functions import set_aoa_table_paths
+from lexical_features.fake_aoa import make_fake_aoa_table
+from lexical_features import TABLE_DIR
+
 # Str parameters for building curricula
 Curriculum = Literal["shuffled", "aoa", "conc", "freq", "phon"]
 Method = Literal["mean", "min", "max", "add"]
@@ -40,6 +44,7 @@ def build_curriculum(
   skip_stopwords: bool = False,
   inflect: bool = False,
   duplication_cap: int = -1,
+  fake_aoa_seed: Optional[int] = None,
 ) -> str: # output curriculum index (numeric prefix of the output folder)
   if tranche_size <= 0 and tranche_type != "matching":
     raise ValueError("tranche_size must be > 0")
@@ -112,6 +117,24 @@ def build_curriculum(
   total_in = 0
   total_kept = 0
   total_dropped = 0
+
+  # check for fake aoa
+  if curriculum == "aoa" and fake_aoa_seed is not None:
+    fake_path = TABLE_DIR / f"aoa_table_inflected_fake_seed{fake_aoa_seed}.parquet"
+    # make fake aoa table if it doesn't exist
+    if not fake_path.exists():
+      make_fake_aoa_table(
+        seed=fake_aoa_seed,
+        in_path=TABLE_DIR / "aoa_table_inflected.parquet",
+        out_path=fake_path,
+      )
+    set_aoa_table_paths(inflected=fake_path)
+    meta["fake_aoa_seed"] = fake_aoa_seed
+    meta["fake_aoa_table"] = str(fake_path)
+  else:
+    # reset table paths in the case that multiple
+    # curricula are made in the same python file
+    set_aoa_table_paths(inflected=None, base=None)
   
   def scored_row_generator():
     nonlocal total_in, total_kept, total_dropped

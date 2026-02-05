@@ -22,6 +22,26 @@ _CONC_LOOKUP: dict[str, float] | None = None
 _AOA_LOOKUP_INFLECTED: dict[str, float] | None = None
 _CONC_LOOKUP_INFLECTED: dict[str, float] | None = None
 
+# override aoa paths
+_AOA_TABLE_OVERRIDE: Path | None = None
+_AOA_TABLE_OVERRIDE_INFLECTED: Path | None = None
+
+# used to override aoa paths for control study
+def set_aoa_table_paths(
+  base: str | Path | None = None,
+  inflected: str | Path | None = None,
+) -> None:
+  global _AOA_TABLE_OVERRIDE, _AOA_TABLE_OVERRIDE_INFLECTED
+  _AOA_TABLE_OVERRIDE = Path(base) if base else None
+  _AOA_TABLE_OVERRIDE_INFLECTED = Path(inflected) if inflected else None
+  reset_aoa_cache()
+
+# resets the aoa cache for control study
+def reset_aoa_cache() -> None:
+  global _AOA_LOOKUP, _AOA_LOOKUP_INFLECTED
+  _AOA_LOOKUP = None
+  _AOA_LOOKUP_INFLECTED = None
+
 # loads a table into a dictionary
 def _load_lookup(parquet_path: str | Path) -> dict[str, float]:
   df = pd.read_parquet(Path(parquet_path), columns=["word", "value"]).copy()
@@ -42,11 +62,13 @@ def aoa(word: str, inflect: bool = False) -> float:
 
   if inflect:
     if _AOA_LOOKUP_INFLECTED is None:
-      _AOA_LOOKUP_INFLECTED = _load_lookup(TABLE_DIR / "aoa_table_inflected.parquet")
+      path = _AOA_TABLE_OVERRIDE_INFLECTED or (TABLE_DIR / "aoa_table_inflected.parquet")
+      _AOA_LOOKUP_INFLECTED = _load_lookup(path)
     return float(_AOA_LOOKUP_INFLECTED.get(key, -1.0))
 
   if _AOA_LOOKUP is None:
-    _AOA_LOOKUP = _load_lookup(TABLE_DIR / "aoa_table.parquet")
+    path = _AOA_TABLE_OVERRIDE or (TABLE_DIR / "aoa_table.parquet")
+    _AOA_LOOKUP = _load_lookup(path)
   return float(_AOA_LOOKUP.get(key, -1.0))
 
 def conc(word: str, inflect: bool = False) -> float:
