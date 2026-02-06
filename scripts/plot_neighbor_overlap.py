@@ -754,29 +754,32 @@ Examples:
     aoa_std_dev_array = np.array(aoa_std_devs)
     shuffled_std_dev_array = np.array(shuffled_std_devs)
     
-    # Plot lines first
+    # Draw shaded error bands first (behind lines) so they are visible
+    # Upper/lower = mean ± std (run-pair std). Replace NaN with 0 so bands plot.
+    aoa_upper = np.array(aoa_overlaps) + np.nan_to_num(aoa_std_dev_array, nan=0.0)
+    aoa_lower = np.array(aoa_overlaps) - np.nan_to_num(aoa_std_dev_array, nan=0.0)
+    plt.fill_between(
+        aoa_x_values, aoa_lower, aoa_upper,
+        color="#87CEEB", alpha=0.2, label=f"{curriculum1_name} ± std"
+    )
+    shuffled_upper = np.array(shuffled_overlaps) + np.nan_to_num(shuffled_std_dev_array, nan=0.0)
+    shuffled_lower = np.array(shuffled_overlaps) - np.nan_to_num(shuffled_std_dev_array, nan=0.0)
+    plt.fill_between(
+        shuffled_x_values, shuffled_lower, shuffled_upper,
+        color="#FFB366", alpha=0.2, label=f"{curriculum2_name} ± std"
+    )
+    
+    # Plot mean lines on top of bands
     plt.plot(
         aoa_x_values, aoa_overlaps,
         linewidth=2, color="#2E86AB", alpha=1.0, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size
     )
-    
     plt.plot(
         shuffled_x_values, shuffled_overlaps,
         linewidth=2, color="#E94F37", alpha=1.0, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size
     )
-    
-    # Add shaded error bands (+/- 1 standard deviation across run-pair means)
-    # Light blue for first curriculum
-    aoa_upper = np.array(aoa_overlaps) + aoa_std_dev_array
-    aoa_lower = np.array(aoa_overlaps) - aoa_std_dev_array
-    plt.fill_between(aoa_x_values, aoa_lower, aoa_upper, color="#87CEEB", alpha=0.2, label=f"{curriculum1_name} ± std")  # Light blue
-    
-    # Light orange for second curriculum  
-    shuffled_upper = np.array(shuffled_overlaps) + shuffled_std_dev_array
-    shuffled_lower = np.array(shuffled_overlaps) - shuffled_std_dev_array
-    plt.fill_between(shuffled_x_values, shuffled_lower, shuffled_upper, color="#FFB366", alpha=0.2, label=f"{curriculum2_name} ± std")  # Light orange
     
     plt.xlabel(x_label, fontsize=12)
     plt.ylabel(f"k={args.k} Nearest Neighbor Overlap", fontsize=12)
@@ -857,6 +860,10 @@ Examples:
         print(f"{curriculum1_name}: mean={np.mean(aoa_overlaps):.4f}, min={np.min(aoa_overlaps):.4f}, max={np.max(aoa_overlaps):.4f}")
     if shuffled_overlaps:
         print(f"{curriculum2_name}: mean={np.mean(shuffled_overlaps):.4f}, min={np.min(shuffled_overlaps):.4f}, max={np.max(shuffled_overlaps):.4f}")
+    if aoa_std_dev_array.size:
+        print(f"{curriculum1_name} std deviation (run-pair): mean={np.mean(aoa_std_dev_array):.4f}, min={np.min(aoa_std_dev_array):.4f}, max={np.max(aoa_std_dev_array):.4f}")
+    if shuffled_std_dev_array.size:
+        print(f"{curriculum2_name} std deviation (run-pair): mean={np.mean(shuffled_std_dev_array):.4f}, min={np.min(shuffled_std_dev_array):.4f}, max={np.max(shuffled_std_dev_array):.4f}")
 
 
 if __name__ == "__main__":
