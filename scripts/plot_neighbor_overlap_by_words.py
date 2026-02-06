@@ -856,29 +856,32 @@ Examples:
     curriculum1_std_dev = np.array(curriculum1_std_devs)
     curriculum2_std_dev = np.array(curriculum2_std_devs)
     
-    # Plot lines first
+    # Draw shaded error bands first (behind lines) so they are visible
+    # Upper/lower = mean ± std (run-pair std). Replace NaN with 0 so bands plot.
+    curriculum1_upper = np.array(curriculum1_overlaps) + np.nan_to_num(curriculum1_std_dev, nan=0.0)
+    curriculum1_lower = np.array(curriculum1_overlaps) - np.nan_to_num(curriculum1_std_dev, nan=0.0)
+    plt.fill_between(
+        curriculum1_word_counts_list, curriculum1_lower, curriculum1_upper,
+        color="#87CEEB", alpha=0.2, label=f"{curriculum1_name} ± std"
+    )
+    curriculum2_upper = np.array(curriculum2_overlaps) + np.nan_to_num(curriculum2_std_dev, nan=0.0)
+    curriculum2_lower = np.array(curriculum2_overlaps) - np.nan_to_num(curriculum2_std_dev, nan=0.0)
+    plt.fill_between(
+        curriculum2_word_counts_list, curriculum2_lower, curriculum2_upper,
+        color="#FFB366", alpha=0.2, label=f"{curriculum2_name} ± std"
+    )
+    
+    # Plot mean lines on top of bands
     plt.plot(
         curriculum1_word_counts_list, curriculum1_overlaps,
         linewidth=2, color="#2E86AB", alpha=1.0, label=f"{curriculum1_name} Curriculum",
         marker='o' if use_markers else None, markersize=marker_size
     )
-    
     plt.plot(
         curriculum2_word_counts_list, curriculum2_overlaps,
         linewidth=2, color="#E94F37", alpha=1.0, label=f"{curriculum2_name} Curriculum",
         marker='s' if use_markers else None, markersize=marker_size
     )
-    
-    # Add shaded error bands (+/- 1 standard deviation across run-pair means)
-    # Light blue for first curriculum
-    curriculum1_upper = np.array(curriculum1_overlaps) + curriculum1_std_dev
-    curriculum1_lower = np.array(curriculum1_overlaps) - curriculum1_std_dev
-    plt.fill_between(curriculum1_word_counts_list, curriculum1_lower, curriculum1_upper, color="#87CEEB", alpha=0.2)  # Light blue
-    
-    # Light orange for second curriculum  
-    curriculum2_upper = np.array(curriculum2_overlaps) + curriculum2_std_dev
-    curriculum2_lower = np.array(curriculum2_overlaps) - curriculum2_std_dev
-    plt.fill_between(curriculum2_word_counts_list, curriculum2_lower, curriculum2_upper, color="#FFB366", alpha=0.2)  # Light orange
     
     # Determine x-axis label based on word count source/type
     if args.word_count_source == "curriculum":
@@ -961,6 +964,10 @@ Examples:
         print(f"{curriculum1_name}: mean={np.mean(curriculum1_overlaps):.4f}, min={np.min(curriculum1_overlaps):.4f}, max={np.max(curriculum1_overlaps):.4f}")
     if curriculum2_overlaps:
         print(f"{curriculum2_name}: mean={np.mean(curriculum2_overlaps):.4f}, min={np.min(curriculum2_overlaps):.4f}, max={np.max(curriculum2_overlaps):.4f}")
+    if curriculum1_std_dev.size:
+        print(f"{curriculum1_name} std deviation (run-pair): mean={np.mean(curriculum1_std_dev):.4f}, min={np.min(curriculum1_std_dev):.4f}, max={np.max(curriculum1_std_dev):.4f}")
+    if curriculum2_std_dev.size:
+        print(f"{curriculum2_name} std deviation (run-pair): mean={np.mean(curriculum2_std_dev):.4f}, min={np.min(curriculum2_std_dev):.4f}, max={np.max(curriculum2_std_dev):.4f}")
 
 
 if __name__ == "__main__":
