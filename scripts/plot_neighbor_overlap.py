@@ -41,6 +41,10 @@ import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from tqdm import tqdm
 
+import pickle
+from datetime import datetime
+
+
 
 def load_tranche_embeddings(tranche_path: Path) -> tuple[list[str], np.ndarray]:
     """
@@ -742,6 +746,62 @@ Examples:
         aoa_x_values = aoa_tranches
         shuffled_x_values = shuffled_tranches
         x_label = "Training Tranche"
+
+    # ------------------------------------------------------------
+    # Always save plot data to a pickle so it can be replotted later
+    # ------------------------------------------------------------
+    pickle_path = output_path.with_suffix(".pkl")
+
+    payload = {
+        "created_utc": datetime.utcnow().isoformat() + "Z",
+        "script": Path(__file__).name,
+        "args": vars(args),
+        "curriculum_names": {
+            "curriculum1": curriculum1_name,
+            "curriculum2": curriculum2_name,
+        },
+        "tranche_types": {
+            "curriculum1_tranche_type": args.curriculum1_tranche_type,
+            "curriculum2_tranche_type": args.curriculum2_tranche_type,
+        },
+        "x_axis": {
+            "mode": args.x_axis,              # "tranche" or "words"
+            "label": x_label,
+            "word_count_type": args.word_count_type if args.x_axis == "words" else None,
+        },
+        "k": args.k,
+        "data": {
+            "curriculum1": {
+                "x_values_used_for_plot": list(aoa_x_values),
+                "tranche_numbers": list(aoa_tranches),
+                "y_overlap_mean": list(aoa_overlaps),
+                "y_overlap_sem": list(aoa_errors),
+                "y_overlap_std": list(aoa_std_devs),
+                "num_runs": aoa_num_runs,
+            },
+            "curriculum2": {
+                "x_values_used_for_plot": list(shuffled_x_values),
+                "tranche_numbers": list(shuffled_tranches),
+                "y_overlap_mean": list(shuffled_overlaps),
+                "y_overlap_sem": list(shuffled_errors),
+                "y_overlap_std": list(shuffled_std_devs),
+                "num_runs": shuffled_num_runs,
+            },
+        },
+    }
+
+    # If x-axis is words, also store the tranche->wordcount maps used
+    if args.x_axis == "words":
+        payload["x_axis"]["tranche_to_wordcount_maps"] = {
+            "curriculum1": dict(aoa_word_counts) if aoa_word_counts is not None else None,
+            "curriculum2": dict(shuffled_word_counts) if shuffled_word_counts is not None else None,
+        }
+
+    with open(pickle_path, "wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print(f"Pickle saved to: {pickle_path}")
+
     
     # Determine marker size based on number of points
     n_points = max(len(aoa_x_values), len(shuffled_x_values))
