@@ -31,6 +31,9 @@ from itertools import combinations
 from pathlib import Path
 from typing import Optional
 
+import pickle
+from datetime import datetime
+
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -840,6 +843,51 @@ Examples:
         word_sample_frac=word_sample_frac,
         seed=args.seed
     )
+
+    # ------------------------------------------------------------
+    # Save plot data to a pickle so it can be replotted later
+    # ------------------------------------------------------------
+    # If output is "...something.png", pickle becomes "...something.pkl"
+    pickle_path = output_path.with_suffix(".pkl")
+
+    payload = {
+        "created_utc": datetime.utcnow().isoformat() + "Z",
+        "script": Path(__file__).name,
+        "args": vars(args),  # all CLI args
+        "curriculum_names": {
+            "curriculum1": curriculum1_name,
+            "curriculum2": curriculum2_name,
+        },
+        "tranche_types": {
+            "curriculum1_tranche_type": args.curriculum1_tranche_type,
+            "curriculum2_tranche_type": args.curriculum2_tranche_type,
+        },
+        "word_count_source": args.word_count_source,
+        "word_count_type": args.word_count_type,
+        "k": args.k,
+        "data": {
+            "curriculum1": {
+                "x_unique_word_counts": list(curriculum1_word_counts_list),
+                "y_overlap_mean": list(curriculum1_overlaps),
+                "y_overlap_sem": list(curriculum1_errors),
+                "y_overlap_std": list(curriculum1_std_devs),
+                "num_runs": curriculum1_num_runs,
+            },
+            "curriculum2": {
+                "x_unique_word_counts": list(curriculum2_word_counts_list),
+                "y_overlap_mean": list(curriculum2_overlaps),
+                "y_overlap_sem": list(curriculum2_errors),
+                "y_overlap_std": list(curriculum2_std_devs),
+                "num_runs": curriculum2_num_runs,
+            },
+        },
+    }
+
+    with open(pickle_path, "wb") as f:
+        pickle.dump(payload, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    print(f"Pickle saved to: {pickle_path}")
+
     
     # Plot
     plt.style.use("seaborn-v0_8-whitegrid")
