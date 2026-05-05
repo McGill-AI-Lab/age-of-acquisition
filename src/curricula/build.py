@@ -120,21 +120,35 @@ def build_curriculum(
 
   # check for fake aoa
   if curriculum == "aoa" and fake_aoa_seed is not None:
-    fake_path = TABLE_DIR / f"aoa_table_inflected_fake_seed{fake_aoa_seed}.parquet"
+    if inflect:
+      in_path = TABLE_DIR / "aoa_table_inflected.parquet"
+      fake_path = TABLE_DIR / f"aoa_table_inflected_fake_seed{fake_aoa_seed}.parquet"
+    else:
+      in_path = TABLE_DIR / "aoa_table.parquet"
+      fake_path = TABLE_DIR / f"aoa_table_fake_seed{fake_aoa_seed}.parquet"
+
     # make fake aoa table if it doesn't exist
     if not fake_path.exists():
       make_fake_aoa_table(
         seed=fake_aoa_seed,
-        in_path=TABLE_DIR / "aoa_table_inflected.parquet",
+        in_path=in_path,
         out_path=fake_path,
       )
-    set_aoa_table_paths(inflected=fake_path)
+
+    # set the correct table paths
+    if inflect:
+      set_aoa_table_paths(inflected=fake_path)
+    else:
+      set_aoa_table_paths(base=fake_path)
+
     meta["fake_aoa_seed"] = fake_aoa_seed
     meta["fake_aoa_table"] = str(fake_path)
+
   else:
     # reset table paths in the case that multiple
     # curricula are made in the same python file
     set_aoa_table_paths(inflected=None, base=None)
+
   
   def scored_row_generator():
     nonlocal total_in, total_kept, total_dropped
