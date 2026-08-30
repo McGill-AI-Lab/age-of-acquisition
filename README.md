@@ -10,12 +10,12 @@ This project investigates whether the order in which humans learn words, known a
 
 To get started, follow the setup instructions in the following README files to build your own curriculum:
 
-- (Corpus Preprocessing)[src/preprocessing/README.md]
-- (Lexical Feature Scoring)[src/lexical_features/README.md]
-- (Sentence Scoring)[src/sentence_scoring/README.md]
-- (Curricula Building)[src/curricula/README.md]
+- [Corpus Preprocessing](src/preprocessing/README.md)
+- [Lexical Feature Scoring](src/lexical_features/README.md)
+- [Sentence Scoring](src/sentence_scoring/README.md)
+- [Curricula Building](src/curricula/README.md)
 
 For training and evaluation, see:
 
-- (Training)[src/training/train_word2vec_tranches.py]
-- (Stability Evaluation)[scripts/plot_neighbor_overlap.py]
+- [Training](src/training/train_word2vec_tranches.py)
+- [Stability Evaluation](scripts/plot_neighbor_overlap.py)
